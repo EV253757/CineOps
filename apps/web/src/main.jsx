@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import "./styles.css";
 
@@ -144,6 +144,8 @@ function App() {
   });
   const [uploadProgress, setUploadProgress] = useState(0);
   const [cloudMessage, setCloudMessage] = useState("");
+  const [activeUpload, setActiveUpload] = useState(null);
+  const uploadController = useRef(null);
   const [libraryAvailability, setLibraryAvailability] = useState({
     local: true,
     azure: false,
@@ -190,6 +192,7 @@ function App() {
     if (!file) return;
     setCloudMessage("Preparando carga…");
     setUploadProgress(0);
+    let grant = null;
     try {
       const authorization = await fetch(
         `${API_URL}/api/admin/cloud/upload-url`,
@@ -202,15 +205,22 @@ function App() {
           body: JSON.stringify({ name: file.name, size: file.size }),
         },
       );
-      const grant = await authorization.json();
+      grant = await authorization.json();
       if (!authorization.ok)
         throw new Error(grant.error || "No se pudo autorizar la carga");
       setCloudMessage(`Subiendo ${file.name}…`);
+      setActiveUpload({ name: file.name, blob_name: grant.blob_name });
+      localStorage.setItem(
+        "cineops_pending_upload",
+        JSON.stringify({ blob_name: grant.blob_name, name: file.name }),
+      );
+      uploadController.current = new AbortController();
       const { BlockBlobClient } = await import("@azure/storage-blob");
       const client = new BlockBlobClient(grant.upload_url);
       await client.uploadBrowserData(file, {
         blockSize: 8 * 1024 * 1024,
         concurrency: 4,
+        abortSignal: uploadController.current.signal,
         blobHTTPHeaders: {
           blobContentType: file.type || "application/octet-stream",
         },
@@ -230,10 +240,36 @@ function App() {
           "El archivo subió, pero no se pudo finalizar el catálogo",
         );
       setCloudMessage("Película disponible en Azure.");
+      localStorage.removeItem("cineops_pending_upload");
       await Promise.all([loadRequests(), loadMovies(search)]);
     } catch (error) {
-      setCloudMessage(error.message);
+      if (grant?.blob_name) {
+        await fetch(`${API_URL}/api/admin/cloud/cancel`, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ blob_name: grant.blob_name }),
+        }).catch(() => {});
+      }
+      localStorage.removeItem("cineops_pending_upload");
+      setUploadProgress(0);
+      setCloudMessage(
+        error.name === "AbortError" || /abort/i.test(error.message)
+          ? "Carga cancelada y datos incompletos eliminados."
+          : `Carga interrumpida y limpiada: ${error.message}`,
+      );
+    } finally {
+      uploadController.current = null;
+      setActiveUpload(null);
     }
+  }
+
+  function cancelCloudUpload() {
+    if (!uploadController.current) return;
+    setCloudMessage("Cancelando y limpiando bloques incompletos…");
+    uploadController.current.abort();
   }
 
   async function deleteCloudMovie(movie) {
@@ -334,6 +370,15 @@ function App() {
     const timer = setTimeout(() => loadMovies(search), 300);
     return () => clearTimeout(timer);
   }, [search, session?.status, accessToken]);
+  useEffect(() => {
+    const warnBeforeLeaving = (event) => {
+      if (!activeUpload) return;
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", warnBeforeLeaving);
+    return () => window.removeEventListener("beforeunload", warnBeforeLeaving);
+  }, [activeUpload]);
 
   const genres = useMemo(
     () =>
@@ -693,15 +738,22 @@ function App() {
                     {formatSize(cloudLibrary.limit_bytes)} usados
                   </p>
                 </div>
-                <label className="cloud-upload">
-                  Subir película
-                  <input
-                    type="file"
-                    accept="video/*,.mkv,.m2ts"
-                    onChange={uploadCloudMovie}
-                    disabled={uploadProgress > 0 && uploadProgress < 100}
-                  />
-                </label>
+                <div className="cloud-upload-actions">
+                  <label className="cloud-upload">
+                    Subir película
+                    <input
+                      type="file"
+                      accept="video/*,.mkv,.m2ts"
+                      onChange={uploadCloudMovie}
+                      disabled={Boolean(activeUpload)}
+                    />
+                  </label>
+                  {activeUpload && (
+                    <button className="cloud-cancel" onClick={cancelCloudUpload}>
+                      Cancelar carga
+                    </button>
+                  )}
+                </div>
               </div>
               <div className="cloud-meter">
                 <i

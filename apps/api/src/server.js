@@ -432,7 +432,7 @@ app.post('/api/admin/cloud/upload-url', requireAdmin, async (request, response, 
     }
     const blobName = `uploads/${crypto.randomUUID()}${extension}`;
     const startsOn = new Date(Date.now() - 60_000);
-    const expiresOn = new Date(Date.now() + 60 * 60_000);
+    const expiresOn = new Date(Date.now() + 12 * 60 * 60_000);
     const sas = generateBlobSASQueryParameters({
       containerName: AZURE_STORAGE_CONTAINER,
       blobName,
@@ -461,6 +461,24 @@ app.post('/api/admin/cloud/finalize', requireAdmin, async (request, response, ne
     await client.setMetadata({ title: encodeURIComponent(movieTitle(title)) });
     cloudCache.expiresAt = 0;
     response.json({ status: 'ready', id: cloudMovieId(blobName) });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post('/api/admin/cloud/cancel', requireAdmin, async (request, response, next) => {
+  try {
+    const blobName = String(request.body?.blob_name || '');
+    if (!blobName.startsWith('uploads/')) return response.status(400).json({ error: 'Carga inválida' });
+    const client = blobContainer.getBlockBlobClient(blobName);
+    try {
+      await client.commitBlockList([]);
+    } catch (error) {
+      if (error.statusCode !== 404) throw error;
+    }
+    await client.deleteIfExists();
+    cloudCache.expiresAt = 0;
+    response.json({ status: 'cancelled' });
   } catch (error) {
     next(error);
   }
