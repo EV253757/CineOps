@@ -205,6 +205,7 @@ function App() {
       const grant = await authorization.json();
       if (!authorization.ok)
         throw new Error(grant.error || "No se pudo autorizar la carga");
+      setCloudMessage(`Subiendo ${file.name}…`);
       const { BlockBlobClient } = await import("@azure/storage-blob");
       const client = new BlockBlobClient(grant.upload_url);
       await client.uploadBrowserData(file, {
