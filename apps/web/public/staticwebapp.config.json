@@ -2,7 +2,7 @@
   "navigationFallback": { "rewrite": "/index.html" },
   "routes": [
     { "route": "/login", "rewrite": "/.auth/login/aad" },
-    { "route": "/*", "allowedRoles": ["cineops-user"] }
+    { "route": "/*", "allowedRoles": ["cineops_user"] }
   ],
   "responseOverrides": {
     "401": { "statusCode": 302, "redirect": "/.auth/login/aad" }

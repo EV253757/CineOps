@@ -33,7 +33,7 @@ Los montajes son de solo lectura. Docker Desktop debe tener acceso a las unidade
 ## Seguridad
 
 - No existen usuarios ni contraseñas predeterminados.
-- El frontend desplegado admite Microsoft y GitHub mediante Azure Static Web Apps, pero exige el rol invitado `cineops-user`.
+- El frontend desplegado admite Microsoft y GitHub mediante Azure Static Web Apps, pero exige el rol invitado `cineops_user`.
 - No expongas los puertos 3001 ni 8096 directamente en el router. Usa Tailscale o un túnel HTTPS con control de acceso.
 - Las rutas `/api/libraries/scan` y `/api/movies/:id/stream` deben quedar accesibles únicamente dentro de la red privada.
 
