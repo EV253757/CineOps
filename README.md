@@ -37,6 +37,17 @@ Los montajes son de solo lectura. Docker Desktop debe tener acceso a las unidade
 - No expongas los puertos 3001 ni 8096 directamente en el router. Usa Tailscale o un túnel HTTPS con control de acceso.
 - Las rutas `/api/libraries/scan` y `/api/movies/:id/stream` deben quedar accesibles únicamente dentro de la red privada.
 
+### Tailscale Serve
+
+La API y Jellyfin se enlazan solo a `127.0.0.1`. Publícalos dentro del tailnet con HTTPS:
+
+```powershell
+tailscale serve --bg --https=443 http://127.0.0.1:3001
+tailscale serve --bg --https=8443 http://127.0.0.1:8096
+```
+
+Los dispositivos clientes deben tener Tailscale conectado al mismo tailnet.
+
 ## Azure Static Web Apps
 
 Configuración de compilación:

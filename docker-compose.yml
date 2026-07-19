@@ -7,9 +7,9 @@ services:
       PORT: 3001
       DATABASE_PATH: /data/cineops.db
       MEDIA_ROOTS: /media/peliculas-e;/media/peliculas-f;/media/peliculas-h
-      CORS_ORIGINS: http://localhost:5173
+      CORS_ORIGINS: http://localhost:5173,https://victorious-glacier-048221c0f.7.azurestaticapps.net
     ports:
-      - "3001:3001"
+      - "127.0.0.1:3001:3001"
     volumes:
       - ./data:/data
       - ${MEDIA_E_PATH}:/media/peliculas-e:ro
@@ -20,7 +20,7 @@ services:
     image: jellyfin/jellyfin:latest
     restart: unless-stopped
     ports:
-      - "8096:8096"
+      - "127.0.0.1:8096:8096"
     volumes:
       - ./jellyfin-config:/config
       - ./jellyfin-cache:/cache
