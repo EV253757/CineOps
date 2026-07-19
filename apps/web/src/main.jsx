@@ -15,6 +15,7 @@ const Icon = ({ name }) => {
     close: <path d="m6 6 12 12M18 6 6 18"/>,
     logout: <><path d="M10 5H5v14h5M14 8l4 4-4 4M18 12H9"/></>,
     grid: <><rect x="4" y="4" width="6" height="6" rx="1"/><rect x="14" y="4" width="6" height="6" rx="1"/><rect x="4" y="14" width="6" height="6" rx="1"/><rect x="14" y="14" width="6" height="6" rx="1"/></>
+    ,settings: <><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1-2.8 2.8-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.6v.2h-4V21a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1L4.2 17l.1-.1a1.7 1.7 0 0 0 .3-1.9A1.7 1.7 0 0 0 3 14H2.8v-4H3a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9L4.2 7 7 4.2l.1.1A1.7 1.7 0 0 0 9 4.6 1.7 1.7 0 0 0 10 3V2.8h4V3a1.7 1.7 0 0 0 1 1.6 1.7 1.7 0 0 0 1.9-.3l.1-.1L19.8 7l-.1.1a1.7 1.7 0 0 0-.3 1.9 1.7 1.7 0 0 0 1.6 1h.2v4H21a1.7 1.7 0 0 0-1.6 1Z"/></>
   };
   return <svg className="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">{paths[name]}</svg>;
 };
@@ -59,6 +60,8 @@ function App() {
   const [session, setSession] = useState(null);
   const [accessToken, setAccessToken] = useState('');
   const [requests, setRequests] = useState([]);
+  const [users, setUsers] = useState([]);
+  const [maintenanceOpen, setMaintenanceOpen] = useState(false);
 
   async function bootstrapSession() {
     try {
@@ -80,8 +83,13 @@ function App() {
 
   async function loadRequests(token = accessToken) {
     if (!token) return;
-    const response = await fetch(`${API_URL}/api/admin/requests`, { headers: { Authorization: `Bearer ${token}` } });
-    if (response.ok) setRequests((await response.json()).items);
+    const headers = { Authorization: `Bearer ${token}` };
+    const [requestResponse, usersResponse] = await Promise.all([
+      fetch(`${API_URL}/api/admin/requests`, { headers }),
+      fetch(`${API_URL}/api/admin/users`, { headers })
+    ]);
+    if (requestResponse.ok) setRequests((await requestResponse.json()).items);
+    if (usersResponse.ok) setUsers((await usersResponse.json()).items);
   }
 
   async function approve(email) {
@@ -89,6 +97,18 @@ function App() {
       method: 'POST', headers: { Authorization: `Bearer ${accessToken}` }
     });
     if (response.ok) loadRequests();
+  }
+
+  async function reject(email) {
+    await fetch(`${API_URL}/api/admin/requests/${encodeURIComponent(email)}/reject`, { method: 'POST', headers: { Authorization: `Bearer ${accessToken}` } });
+    loadRequests();
+  }
+
+  async function setUserStatus(email, status) {
+    await fetch(`${API_URL}/api/admin/users/${encodeURIComponent(email)}/status`, {
+      method: 'POST', headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ status })
+    });
+    loadRequests();
   }
 
   async function loadMovies(query = '') {
@@ -135,6 +155,7 @@ function App() {
           <a className="active" href="#inicio"><Icon name="home" /> Inicio</a>
           <a href="#catalogo"><Icon name="compass" /> Explorar</a>
           <a href="#bibliotecas"><Icon name="library" /> Mi biblioteca</a>
+          {session.role === 'admin' && <button className="maintenance-nav" onClick={() => { setMaintenanceOpen(true); loadRequests(); }}><Icon name="settings" /> Mantenimiento {requests.length > 0 && <b>{requests.length}</b>}</button>}
         </nav>
         {session.role === 'admin' && <div className="approval-card"><span>{requests.length}</span><div><strong>Solicitudes</strong><small>pendientes de aprobación</small></div></div>}
         <div className="storage-card">
@@ -152,7 +173,7 @@ function App() {
             <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Buscar en tu colección" />
             <kbd>⌘ K</kbd>
           </label>
-          <div className="profile"><span>{(session.name || session.email).slice(0, 2).toUpperCase()}</span><div><strong>{session.name || session.email}</strong><small>{session.role === 'admin' ? 'Administrador' : 'Usuario'}</small></div></div>
+          <div className="top-actions">{session.role === 'admin' && <button className="top-maintenance" onClick={() => { setMaintenanceOpen(true); loadRequests(); }}><Icon name="settings" />{requests.length > 0 && <b>{requests.length}</b>}</button>}<div className="profile"><span>{(session.name || session.email).slice(0, 2).toUpperCase()}</span><div><strong>{session.name || session.email}</strong><small>{session.role === 'admin' ? 'Administrador' : 'Usuario'}</small></div></div></div>
         </header>
 
         <main>
@@ -171,8 +192,6 @@ function App() {
             </div>
             <div className="hero-count"><strong>{movies.length}</strong><span>TÍTULOS</span></div>
           </section>
-
-          {session.role === 'admin' && requests.length > 0 && <section className="requests-panel"><div><span className="overline">ADMINISTRACIÓN</span><h2>Solicitudes de acceso</h2></div>{requests.map((request) => <article key={request.email}><div><strong>{request.display_name}</strong><span>{request.email} · Microsoft</span></div><button onClick={() => approve(request.email)}>Aprobar como usuario</button></article>)}</section>}
 
           <section className="catalog" id="catalogo">
             <div className="section-heading">
@@ -203,6 +222,8 @@ function App() {
           </section>
         </main>
       </div>
+
+      {maintenanceOpen && session.role === 'admin' && <div className="maintenance-modal" role="dialog" aria-modal="true"><div className="maintenance-shell"><header><div><span className="overline">CINEOPS ADMIN</span><h2>Mantenimiento</h2><p>Administra solicitudes, usuarios y permisos de acceso.</p></div><button className="modal-close" onClick={() => setMaintenanceOpen(false)}><Icon name="close" /></button></header><div className="admin-stats"><div><strong>{requests.length}</strong><span>Solicitudes pendientes</span></div><div><strong>{users.filter((user) => user.status === 'approved').length}</strong><span>Usuarios activos</span></div><div><strong>{users.filter((user) => user.status === 'blocked').length}</strong><span>Usuarios bloqueados</span></div></div><section><h3>Solicitudes pendientes</h3>{requests.length === 0 ? <p className="admin-empty">No hay solicitudes pendientes.</p> : requests.map((request) => <article className="admin-row" key={request.email}><div className="admin-avatar">{request.display_name.slice(0,2).toUpperCase()}</div><div className="admin-identity"><strong>{request.display_name}</strong><span>{request.email} · Microsoft</span></div><div className="admin-actions"><button className="approve" onClick={() => approve(request.email)}>Aprobar</button><button onClick={() => reject(request.email)}>Rechazar</button></div></article>)}</section><section><h3>Inventario de usuarios</h3>{users.map((user) => <article className="admin-row" key={user.email}><div className="admin-avatar">{user.display_name.slice(0,2).toUpperCase()}</div><div className="admin-identity"><strong>{user.display_name} <em>{user.role}</em></strong><span>{user.email}</span></div><span className={`user-status ${user.status}`}>{user.status === 'approved' ? 'Activo' : 'Bloqueado'}</span>{user.role !== 'admin' && <div className="admin-actions"><button onClick={() => setUserStatus(user.email, user.status === 'approved' ? 'blocked' : 'approved')}>{user.status === 'approved' ? 'Bloquear' : 'Reactivar'}</button></div>}</article>)}</section></div></div>}
 
       {selected && (
         <div className="player-modal" role="dialog" aria-modal="true">

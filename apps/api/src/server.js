@@ -245,6 +245,11 @@ app.get('/api/admin/requests', requireAdmin, (_request, response) => {
                                      FROM access_requests WHERE status='pending' ORDER BY requested_at`).all() });
 });
 
+app.get('/api/admin/users', requireAdmin, (_request, response) => {
+  response.json({ items: db.prepare(`SELECT email, display_name, role, status, created_at, updated_at
+                                     FROM access_users ORDER BY role, display_name`).all() });
+});
+
 app.post('/api/admin/requests/:email/approve', requireAdmin, (request, response) => {
   const email = decodeURIComponent(request.params.email).toLowerCase();
   const pending = db.prepare('SELECT * FROM access_requests WHERE email = ?').get(email);
@@ -256,6 +261,24 @@ app.post('/api/admin/requests/:email/approve', requireAdmin, (request, response)
     .run(email, pending.display_name, now, now);
   db.prepare(`UPDATE access_requests SET status='approved', resolved_at=? WHERE email=?`).run(now, email);
   return response.json({ email, role: 'user', status: 'approved' });
+});
+
+app.post('/api/admin/requests/:email/reject', requireAdmin, (request, response) => {
+  const email = decodeURIComponent(request.params.email).toLowerCase();
+  const result = db.prepare(`UPDATE access_requests SET status='rejected', resolved_at=? WHERE email=? AND status='pending'`)
+    .run(new Date().toISOString(), email);
+  return result.changes ? response.json({ email, status: 'rejected' }) : response.sendStatus(404);
+});
+
+app.post('/api/admin/users/:email/status', requireAdmin, (request, response) => {
+  const email = decodeURIComponent(request.params.email).toLowerCase();
+  const status = request.body?.status;
+  if (!['approved', 'blocked'].includes(status)) return response.status(400).json({ error: 'Estado inválido' });
+  const user = currentAccess(email);
+  if (!user) return response.sendStatus(404);
+  if (user.role === 'admin') return response.status(400).json({ error: 'No se puede bloquear una cuenta administradora' });
+  db.prepare('UPDATE access_users SET status=?, updated_at=? WHERE email=?').run(status, new Date().toISOString(), email);
+  return response.json({ email, status });
 });
 
 app.get('/api/health', (_request, response) => {
