@@ -3,6 +3,12 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { Readable } from 'node:stream';
 import { DatabaseSync } from 'node:sqlite';
+import {
+  BlobSASPermissions,
+  BlobServiceClient,
+  generateBlobSASQueryParameters,
+  StorageSharedKeyCredential
+} from '@azure/storage-blob';
 import cors from 'cors';
 import express from 'express';
 
@@ -20,6 +26,26 @@ const JELLYFIN_PUBLIC_URL = (process.env.JELLYFIN_PUBLIC_URL || '').replace(/\/$
 const JELLYFIN_API_KEY = process.env.JELLYFIN_API_KEY || '';
 const AUTH_SIGNING_SECRET = process.env.AUTH_SIGNING_SECRET || '';
 const ADMIN_EMAIL = (process.env.ADMIN_EMAIL || '').trim().toLowerCase();
+const AZURE_STORAGE_CONNECTION_STRING = process.env.AZURE_STORAGE_CONNECTION_STRING || '';
+const AZURE_STORAGE_CONTAINER = process.env.AZURE_STORAGE_CONTAINER || 'movies';
+
+function connectionValue(name) {
+  const match = AZURE_STORAGE_CONNECTION_STRING.split(';')
+    .map((part) => part.split('='))
+    .find(([key]) => key === name);
+  return match ? match.slice(1).join('=') : '';
+}
+
+const storageAccountName = connectionValue('AccountName');
+const storageAccountKey = connectionValue('AccountKey');
+const blobService = AZURE_STORAGE_CONNECTION_STRING
+  ? BlobServiceClient.fromConnectionString(AZURE_STORAGE_CONNECTION_STRING)
+  : null;
+const blobContainer = blobService?.getContainerClient(AZURE_STORAGE_CONTAINER);
+const blobCredential = storageAccountName && storageAccountKey
+  ? new StorageSharedKeyCredential(storageAccountName, storageAccountKey)
+  : null;
+let cloudCache = { expiresAt: 0, items: [], names: new Map() };
 
 async function jellyfinFetch(endpoint, options = {}) {
   if (!JELLYFIN_URL || !JELLYFIN_API_KEY) throw new Error('Jellyfin no está configurado');
@@ -158,6 +184,72 @@ function movieTitle(filePath) {
     .replace(/[._]+/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
+}
+
+function cloudMovieId(blobName) {
+  return `azure_${crypto.createHash('sha256').update(blobName).digest('hex').slice(0, 24)}`;
+}
+
+function metadataGenres(value = '') {
+  if (!value) return [];
+  try {
+    const parsed = JSON.parse(value);
+    if (Array.isArray(parsed)) return parsed.map(String);
+  } catch {}
+  return value.split(',').map((genre) => genre.trim()).filter(Boolean);
+}
+
+async function cloudMovies(force = false) {
+  if (!blobContainer) return [];
+  if (!force && cloudCache.expiresAt > Date.now()) return cloudCache.items;
+
+  const items = [];
+  const names = new Map();
+  for await (const blob of blobContainer.listBlobsFlat({ includeMetadata: true })) {
+    const extension = path.extname(blob.name).slice(1).toLowerCase();
+    if (!VIDEO_EXTENSIONS.has(`.${extension}`)) continue;
+    const id = cloudMovieId(blob.name);
+    names.set(id, blob.name);
+    items.push({
+      id,
+      title: blob.metadata?.title || movieTitle(blob.name),
+      library: 'Azure',
+      extension,
+      size_bytes: blob.properties.contentLength || 0,
+      modified_at: blob.properties.lastModified?.toISOString(),
+      year: Number(blob.metadata?.year) || null,
+      overview: blob.metadata?.overview || '',
+      genres: metadataGenres(blob.metadata?.genres),
+      rating: Number(blob.metadata?.rating) || null,
+      has_image: false,
+      has_backdrop: false,
+      source: 'azure'
+    });
+  }
+  items.sort((a, b) => a.title.localeCompare(b.title, 'es'));
+  cloudCache = { expiresAt: Date.now() + 300_000, items, names };
+  return items;
+}
+
+async function cloudBlobName(id) {
+  await cloudMovies();
+  if (!cloudCache.names.has(id)) await cloudMovies(true);
+  return cloudCache.names.get(id);
+}
+
+function cloudReadUrl(blobName) {
+  if (!blobCredential) return null;
+  const startsOn = new Date(Date.now() - 60_000);
+  const expiresOn = new Date(Date.now() + 15 * 60_000);
+  const sas = generateBlobSASQueryParameters({
+    containerName: AZURE_STORAGE_CONTAINER,
+    blobName,
+    permissions: BlobSASPermissions.parse('r'),
+    startsOn,
+    expiresOn,
+    protocol: 'https'
+  }, blobCredential).toString();
+  return `${blobContainer.getBlobClient(blobName).url}?${sas}`;
 }
 
 function* walk(directory) {
@@ -299,12 +391,14 @@ app.delete('/api/admin/users/:email', requireAdmin, (request, response) => {
 });
 
 app.get('/api/health', (_request, response) => {
-  response.json({ status: 'ok', libraries: MEDIA_ROOTS.length });
+  response.json({ status: 'ok', libraries: MEDIA_ROOTS.length, azure_blob: Boolean(blobContainer) });
 });
 
 app.get('/api/movies', requireUser, async (request, response, next) => {
   const search = String(request.query.search || '').trim();
   const limit = Math.min(Math.max(Number(request.query.limit) || 100, 1), 500);
+  let primaryItems = [];
+  let primarySource = 'local';
   if (JELLYFIN_URL && JELLYFIN_API_KEY) {
     try {
       const params = new URLSearchParams({
@@ -316,18 +410,30 @@ app.get('/api/movies', requireUser, async (request, response, next) => {
       if (search) params.set('SearchTerm', search);
       const jfResponse = await jellyfinFetch(`/Items?${params}`);
       const data = await jfResponse.json();
-      const items = data.Items.map(mapJellyfinItem);
-      return response.json({ items, count: items.length, total: data.TotalRecordCount, source: 'jellyfin' });
+      primaryItems = data.Items.map(mapJellyfinItem);
+      primarySource = 'jellyfin';
     } catch (error) {
       return next(error);
     }
+  } else {
+    primaryItems = search
+      ? db.prepare(`SELECT id, title, library, extension, size_bytes, modified_at
+                    FROM movies WHERE title LIKE ? ORDER BY title LIMIT ?`).all(`%${search}%`, limit)
+      : db.prepare(`SELECT id, title, library, extension, size_bytes, modified_at
+                    FROM movies ORDER BY title LIMIT ?`).all(limit);
   }
-  const rows = search
-    ? db.prepare(`SELECT id, title, library, extension, size_bytes, modified_at
-                  FROM movies WHERE title LIKE ? ORDER BY title LIMIT ?`).all(`%${search}%`, limit)
-    : db.prepare(`SELECT id, title, library, extension, size_bytes, modified_at
-                  FROM movies ORDER BY title LIMIT ?`).all(limit);
-  return response.json({ items: rows, count: rows.length, source: 'local' });
+
+  try {
+    const azureItems = (await cloudMovies()).filter((movie) => !search
+      || movie.title.toLocaleLowerCase('es').includes(search.toLocaleLowerCase('es')));
+    const items = [...primaryItems, ...azureItems]
+      .sort((a, b) => a.title.localeCompare(b.title, 'es'))
+      .slice(0, limit);
+    return response.json({ items, count: items.length, source: azureItems.length ? `${primarySource}+azure` : primarySource });
+  } catch (error) {
+    console.warn(`No se pudo consultar Azure Blob: ${error.message}`);
+    return response.json({ items: primaryItems, count: primaryItems.length, source: primarySource, azure_error: true });
+  }
 });
 
 app.get('/api/movies/:id/image', requireUser, async (request, response, next) => {
@@ -352,7 +458,18 @@ app.post('/api/libraries/scan', requireAdmin, (_request, response, next) => {
   }
 });
 
-app.get('/api/movies/:id/stream', requireUser, (request, response) => {
+app.get('/api/movies/:id/stream', requireUser, async (request, response) => {
+  if (request.params.id.startsWith('azure_')) {
+    try {
+      const blobName = await cloudBlobName(request.params.id);
+      if (!blobName) return response.sendStatus(404);
+      const url = cloudReadUrl(blobName);
+      return url ? response.redirect(307, url) : response.sendStatus(503);
+    } catch (error) {
+      console.error(error);
+      return response.sendStatus(502);
+    }
+  }
   if (JELLYFIN_URL && JELLYFIN_API_KEY) {
     const headers = request.headers.range ? { Range: request.headers.range } : {};
     return jellyfinFetch(`/Videos/${encodeURIComponent(request.params.id)}/stream?static=true`, { headers })

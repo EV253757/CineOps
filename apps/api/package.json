@@ -9,8 +9,8 @@
     "check": "node --check src/server.js"
   },
   "dependencies": {
+    "@azure/storage-blob": "^12.28.0",
     "cors": "^2.8.5",
     "express": "^5.1.0"
   }
 }
-

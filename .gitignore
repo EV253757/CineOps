@@ -7,4 +7,4 @@ data/
 *.db-wal
 jellyfin-config/
 jellyfin-cache/
-
+.oci/
