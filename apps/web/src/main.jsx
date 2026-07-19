@@ -34,13 +34,13 @@ function palette(seed = '') {
   return palettes[score % palettes.length];
 }
 
-function MovieArtwork({ movie, large = false }) {
+function MovieArtwork({ movie, large = false, token = '' }) {
   const colors = palette(movie?.title);
   const imageType = large && movie?.has_backdrop ? 'Backdrop' : 'Primary';
   const hasImage = imageType === 'Backdrop' ? movie?.has_backdrop : movie?.has_image;
   return (
     <div className={`artwork ${large ? 'large' : ''}`} style={{ '--accent': colors[0], '--deep': colors[1] }}>
-      {hasImage && <img src={`${API_URL}/api/movies/${movie.id}/image?type=${imageType}&width=${large ? 1600 : 500}`} alt="" />}
+      {hasImage && <img src={`${API_URL}/api/movies/${movie.id}/image?type=${imageType}&width=${large ? 1600 : 500}&access_token=${encodeURIComponent(token)}`} alt="" />}
       <div className="art-glow" />
       {!hasImage && <span className="art-letter">{movie?.title?.[0] || 'C'}</span>}
       <span className="format">{movie?.extension?.toUpperCase() || 'VIDEO'}</span>
@@ -56,11 +56,45 @@ function App() {
   const [featured, setFeatured] = useState(null);
   const [status, setStatus] = useState('loading');
   const [activeLibrary, setActiveLibrary] = useState('Todas');
+  const [session, setSession] = useState(null);
+  const [accessToken, setAccessToken] = useState('');
+  const [requests, setRequests] = useState([]);
+
+  async function bootstrapSession() {
+    try {
+      const identityResponse = await fetch('/api/auth/token', { cache: 'no-store' });
+      if (!identityResponse.ok) throw new Error('Microsoft no autenticado');
+      const identity = await identityResponse.json();
+      const exchange = await fetch(`${API_URL}/api/auth/exchange`, {
+        method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token: identity.token })
+      });
+      if (!exchange.ok) throw new Error('No se pudo crear la sesión');
+      const data = await exchange.json();
+      setSession(data);
+      setAccessToken(data.access_token);
+    } catch (error) {
+      setSession({ status: 'error', error: error.message });
+    }
+  }
+
+  async function loadRequests(token = accessToken) {
+    if (!token) return;
+    const response = await fetch(`${API_URL}/api/admin/requests`, { headers: { Authorization: `Bearer ${token}` } });
+    if (response.ok) setRequests((await response.json()).items);
+  }
+
+  async function approve(email) {
+    const response = await fetch(`${API_URL}/api/admin/requests/${encodeURIComponent(email)}/approve`, {
+      method: 'POST', headers: { Authorization: `Bearer ${accessToken}` }
+    });
+    if (response.ok) loadRequests();
+  }
 
   async function loadMovies(query = '') {
     setStatus('loading');
     try {
-      const response = await fetch(`${API_URL}/api/movies?limit=500&search=${encodeURIComponent(query)}`);
+      const response = await fetch(`${API_URL}/api/movies?limit=500&search=${encodeURIComponent(query)}`, { headers: { Authorization: `Bearer ${accessToken}` } });
       if (!response.ok) throw new Error('API no disponible');
       const data = await response.json();
       setMovies(data.items);
@@ -71,11 +105,16 @@ function App() {
     }
   }
 
-  useEffect(() => { loadMovies(); }, []);
+  useEffect(() => { bootstrapSession(); }, []);
   useEffect(() => {
+    if (session?.status === 'approved' && accessToken) loadMovies();
+    if (session?.role === 'admin' && accessToken) loadRequests(accessToken);
+  }, [session?.status, accessToken]);
+  useEffect(() => {
+    if (session?.status !== 'approved' || !accessToken) return undefined;
     const timer = setTimeout(() => loadMovies(search), 300);
     return () => clearTimeout(timer);
-  }, [search]);
+  }, [search, session?.status, accessToken]);
 
   const libraries = useMemo(() => ['Todas', ...new Set(movies.map((movie) => movie.library))], [movies]);
   const visibleMovies = useMemo(
@@ -83,6 +122,9 @@ function App() {
     [movies, activeLibrary]
   );
   const totalSize = useMemo(() => movies.reduce((sum, movie) => sum + Number(movie.size_bytes), 0), [movies]);
+
+  if (!session) return <div className="access-screen"><div className="access-card"><span className="access-logo">C</span><h1>Preparando tu sesión</h1><p>Verificando identidad con Microsoft…</p><div className="access-loader" /></div></div>;
+  if (session.status !== 'approved') return <div className="access-screen"><div className="access-card"><span className="access-logo">C</span><small>SOLICITUD RECIBIDA</small><h1>Acceso pendiente</h1><p>{session.status === 'error' ? session.error : `Hola ${session.name || session.email}. Tu solicitud llegó al administrador de CineOps. Podrás entrar cuando sea aprobada.`}</p><button onClick={bootstrapSession}>Comprobar aprobación</button><a href="/.auth/logout">Usar otra cuenta</a></div></div>;
 
   return (
     <div className="app-shell">
@@ -94,6 +136,7 @@ function App() {
           <a href="#catalogo"><Icon name="compass" /> Explorar</a>
           <a href="#bibliotecas"><Icon name="library" /> Mi biblioteca</a>
         </nav>
+        {session.role === 'admin' && <div className="approval-card"><span>{requests.length}</span><div><strong>Solicitudes</strong><small>pendientes de aprobación</small></div></div>}
         <div className="storage-card">
           <span className="storage-icon"><Icon name="library" /></span>
           <div><strong>{formatSize(totalSize)}</strong><small>Biblioteca indexada</small></div>
@@ -109,12 +152,12 @@ function App() {
             <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Buscar en tu colección" />
             <kbd>⌘ K</kbd>
           </label>
-          <div className="profile"><span>EV</span><div><strong>Engember</strong><small>Administrador</small></div></div>
+          <div className="profile"><span>{(session.name || session.email).slice(0, 2).toUpperCase()}</span><div><strong>{session.name || session.email}</strong><small>{session.role === 'admin' ? 'Administrador' : 'Usuario'}</small></div></div>
         </header>
 
         <main>
           <section className="hero" id="inicio">
-            <div className="hero-background"><MovieArtwork movie={featured} large /></div>
+            <div className="hero-background"><MovieArtwork movie={featured} large token={accessToken} /></div>
             <div className="hero-shade" />
             <div className="hero-content">
               <span className="featured-label"><i /> DESTACADA DE TU COLECCIÓN</span>
@@ -128,6 +171,8 @@ function App() {
             </div>
             <div className="hero-count"><strong>{movies.length}</strong><span>TÍTULOS</span></div>
           </section>
+
+          {session.role === 'admin' && requests.length > 0 && <section className="requests-panel"><div><span className="overline">ADMINISTRACIÓN</span><h2>Solicitudes de acceso</h2></div>{requests.map((request) => <article key={request.email}><div><strong>{request.display_name}</strong><span>{request.email} · Microsoft</span></div><button onClick={() => approve(request.email)}>Aprobar como usuario</button></article>)}</section>}
 
           <section className="catalog" id="catalogo">
             <div className="section-heading">
@@ -148,7 +193,7 @@ function App() {
               <div className="movie-grid">
                 {visibleMovies.map((movie) => (
                   <article className="movie-card" key={movie.id} onClick={() => setSelected(movie)}>
-                    <MovieArtwork movie={movie} />
+                    <MovieArtwork movie={movie} token={accessToken} />
                     <button className="card-play" aria-label={`Reproducir ${movie.title}`}><Icon name="play" /></button>
                     <div className="movie-copy"><h3>{movie.title}</h3><p><span>{movie.year || movie.extension.toUpperCase()}</span> {movie.rating ? `★ ${movie.rating.toFixed(1)} · ` : ''}{movie.library}</p></div>
                   </article>
@@ -163,7 +208,7 @@ function App() {
         <div className="player-modal" role="dialog" aria-modal="true">
           <div className="player-card">
             <button className="modal-close" onClick={() => setSelected(null)}><Icon name="close" /></button>
-            <video controls autoPlay src={`${API_URL}/api/movies/${selected.id}/stream`} />
+            <video controls autoPlay src={`${API_URL}/api/movies/${selected.id}/stream?access_token=${encodeURIComponent(accessToken)}`} />
             <div className="player-info"><div><span>REPRODUCIENDO AHORA</span><h2>{selected.title}</h2><p>{selected.overview}</p></div><div className="player-links"><p>{selected.library} · {formatSize(selected.size_bytes)}</p>{selected.jellyfin_url && <a href={selected.jellyfin_url} target="_blank" rel="noreferrer">Abrir en Jellyfin para transcodificar</a>}</div></div>
           </div>
         </div>

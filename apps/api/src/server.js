@@ -18,6 +18,8 @@ const VIDEO_EXTENSIONS = new Set([
 const JELLYFIN_URL = (process.env.JELLYFIN_URL || '').replace(/\/$/, '');
 const JELLYFIN_PUBLIC_URL = (process.env.JELLYFIN_PUBLIC_URL || '').replace(/\/$/, '');
 const JELLYFIN_API_KEY = process.env.JELLYFIN_API_KEY || '';
+const AUTH_SIGNING_SECRET = process.env.AUTH_SIGNING_SECRET || '';
+const ADMIN_EMAIL = (process.env.ADMIN_EMAIL || '').trim().toLowerCase();
 
 async function jellyfinFetch(endpoint, options = {}) {
   if (!JELLYFIN_URL || !JELLYFIN_API_KEY) throw new Error('Jellyfin no está configurado');
@@ -61,7 +63,82 @@ db.exec(`
     modified_at TEXT NOT NULL,
     indexed_at TEXT NOT NULL
   );
+  CREATE TABLE IF NOT EXISTS access_users (
+    email TEXT PRIMARY KEY,
+    display_name TEXT NOT NULL,
+    role TEXT NOT NULL CHECK(role IN ('admin', 'user')),
+    status TEXT NOT NULL CHECK(status IN ('approved', 'blocked')),
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS access_requests (
+    email TEXT PRIMARY KEY,
+    display_name TEXT NOT NULL,
+    provider TEXT NOT NULL,
+    status TEXT NOT NULL CHECK(status IN ('pending', 'approved', 'rejected')),
+    requested_at TEXT NOT NULL,
+    resolved_at TEXT
+  );
 `);
+
+if (ADMIN_EMAIL) {
+  const now = new Date().toISOString();
+  db.prepare(`INSERT INTO access_users (email, display_name, role, status, created_at, updated_at)
+              VALUES (?, ?, 'admin', 'approved', ?, ?)
+              ON CONFLICT(email) DO UPDATE SET role='admin', status='approved', updated_at=excluded.updated_at`)
+    .run(ADMIN_EMAIL, 'Administrador', now, now);
+}
+
+function base64url(value) {
+  return Buffer.from(value).toString('base64url');
+}
+
+function signSession(payload) {
+  const header = base64url(JSON.stringify({ alg: 'HS256', typ: 'JWT' }));
+  const body = base64url(JSON.stringify(payload));
+  const signature = crypto.createHmac('sha256', AUTH_SIGNING_SECRET).update(`${header}.${body}`).digest('base64url');
+  return `${header}.${body}.${signature}`;
+}
+
+function verifySession(token) {
+  if (!AUTH_SIGNING_SECRET || !token) return null;
+  const parts = token.split('.');
+  if (parts.length !== 3) return null;
+  const expected = crypto.createHmac('sha256', AUTH_SIGNING_SECRET).update(`${parts[0]}.${parts[1]}`).digest('base64url');
+  const actualBuffer = Buffer.from(parts[2]);
+  const expectedBuffer = Buffer.from(expected);
+  if (actualBuffer.length !== expectedBuffer.length || !crypto.timingSafeEqual(actualBuffer, expectedBuffer)) return null;
+  const payload = JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf8'));
+  return payload.exp >= Math.floor(Date.now() / 1000) ? payload : null;
+}
+
+function cookieValue(request, name) {
+  const cookies = Object.fromEntries((request.headers.cookie || '').split(';').map((item) => {
+    const index = item.indexOf('=');
+    return index < 0 ? ['', ''] : [item.slice(0, index).trim(), decodeURIComponent(item.slice(index + 1))];
+  }));
+  return cookies[name];
+}
+
+function currentAccess(email) {
+  return db.prepare('SELECT email, display_name, role, status FROM access_users WHERE email = ?').get(email.toLowerCase());
+}
+
+function requireUser(request, response, next) {
+  const bearer = request.headers.authorization?.startsWith('Bearer ') ? request.headers.authorization.slice(7) : null;
+  const identity = verifySession(cookieValue(request, 'cineops_session') || bearer || request.query.access_token);
+  if (!identity?.email) return response.status(401).json({ error: 'Sesión requerida' });
+  const access = currentAccess(identity.email);
+  if (!access || access.status !== 'approved') return response.status(403).json({ error: 'Acceso pendiente' });
+  request.identity = { ...identity, ...access };
+  next();
+}
+
+function requireAdmin(request, response, next) {
+  requireUser(request, response, () => request.identity.role === 'admin'
+    ? next()
+    : response.status(403).json({ error: 'Rol de administrador requerido' }));
+}
 
 const upsertMovie = db.prepare(`
   INSERT INTO movies (id, title, file_path, library, extension, size_bytes, modified_at, indexed_at)
@@ -135,14 +212,57 @@ function scanLibraries() {
 
 const app = express();
 const allowedOrigins = (process.env.CORS_ORIGINS || 'http://localhost:5173').split(',');
-app.use(cors({ origin: allowedOrigins }));
+app.use(cors({ origin: allowedOrigins, credentials: true }));
 app.use(express.json());
+
+app.post('/api/auth/exchange', (request, response) => {
+  const identity = verifySession(request.body?.token);
+  if (!identity?.email) return response.status(401).json({ error: 'Identidad Microsoft inválida' });
+  const email = identity.email.toLowerCase();
+  let access = currentAccess(email);
+  const now = new Date().toISOString();
+  if (!access) {
+    db.prepare(`INSERT INTO access_requests (email, display_name, provider, status, requested_at)
+                VALUES (?, ?, ?, 'pending', ?)
+                ON CONFLICT(email) DO UPDATE SET display_name=excluded.display_name, status='pending', requested_at=excluded.requested_at`)
+      .run(email, identity.name || email, identity.provider || 'aad', now);
+  }
+  access = currentAccess(email);
+  const session = signSession({ email, name: identity.name || email, provider: identity.provider || 'aad', exp: Math.floor(Date.now() / 1000) + 3600 });
+  response.setHeader('Set-Cookie', `cineops_session=${session}; Path=/; HttpOnly; Secure; SameSite=None; Max-Age=3600`);
+  return response.json({ email, name: identity.name || email, role: access?.role || 'pending', status: access?.status || 'pending', access_token: session });
+});
+
+app.get('/api/auth/me', (request, response) => {
+  const identity = verifySession(cookieValue(request, 'cineops_session'));
+  if (!identity?.email) return response.status(401).json({ error: 'Sesión requerida' });
+  const access = currentAccess(identity.email);
+  return response.json({ email: identity.email, name: identity.name, role: access?.role || 'pending', status: access?.status || 'pending' });
+});
+
+app.get('/api/admin/requests', requireAdmin, (_request, response) => {
+  response.json({ items: db.prepare(`SELECT email, display_name, provider, status, requested_at
+                                     FROM access_requests WHERE status='pending' ORDER BY requested_at`).all() });
+});
+
+app.post('/api/admin/requests/:email/approve', requireAdmin, (request, response) => {
+  const email = decodeURIComponent(request.params.email).toLowerCase();
+  const pending = db.prepare('SELECT * FROM access_requests WHERE email = ?').get(email);
+  if (!pending) return response.sendStatus(404);
+  const now = new Date().toISOString();
+  db.prepare(`INSERT INTO access_users (email, display_name, role, status, created_at, updated_at)
+              VALUES (?, ?, 'user', 'approved', ?, ?)
+              ON CONFLICT(email) DO UPDATE SET role='user', status='approved', updated_at=excluded.updated_at`)
+    .run(email, pending.display_name, now, now);
+  db.prepare(`UPDATE access_requests SET status='approved', resolved_at=? WHERE email=?`).run(now, email);
+  return response.json({ email, role: 'user', status: 'approved' });
+});
 
 app.get('/api/health', (_request, response) => {
   response.json({ status: 'ok', libraries: MEDIA_ROOTS.length });
 });
 
-app.get('/api/movies', async (request, response, next) => {
+app.get('/api/movies', requireUser, async (request, response, next) => {
   const search = String(request.query.search || '').trim();
   const limit = Math.min(Math.max(Number(request.query.limit) || 100, 1), 500);
   if (JELLYFIN_URL && JELLYFIN_API_KEY) {
@@ -170,7 +290,7 @@ app.get('/api/movies', async (request, response, next) => {
   return response.json({ items: rows, count: rows.length, source: 'local' });
 });
 
-app.get('/api/movies/:id/image', async (request, response, next) => {
+app.get('/api/movies/:id/image', requireUser, async (request, response, next) => {
   try {
     const type = request.query.type === 'Backdrop' ? 'Backdrop' : 'Primary';
     const width = Math.min(Math.max(Number(request.query.width) || 500, 100), 1920);
@@ -184,7 +304,7 @@ app.get('/api/movies/:id/image', async (request, response, next) => {
   }
 });
 
-app.post('/api/libraries/scan', (_request, response, next) => {
+app.post('/api/libraries/scan', requireAdmin, (_request, response, next) => {
   try {
     response.json(scanLibraries());
   } catch (error) {
@@ -192,7 +312,7 @@ app.post('/api/libraries/scan', (_request, response, next) => {
   }
 });
 
-app.get('/api/movies/:id/stream', (request, response) => {
+app.get('/api/movies/:id/stream', requireUser, (request, response) => {
   if (JELLYFIN_URL && JELLYFIN_API_KEY) {
     const headers = request.headers.range ? { Range: request.headers.range } : {};
     return jellyfinFetch(`/Videos/${encodeURIComponent(request.params.id)}/stream?static=true`, { headers })
