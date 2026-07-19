@@ -62,6 +62,7 @@ function App() {
   const [requests, setRequests] = useState([]);
   const [users, setUsers] = useState([]);
   const [maintenanceOpen, setMaintenanceOpen] = useState(false);
+  const [profileOpen, setProfileOpen] = useState(false);
 
   async function bootstrapSession() {
     try {
@@ -173,7 +174,7 @@ function App() {
             <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Buscar en tu colección" />
             <kbd>⌘ K</kbd>
           </label>
-          <div className="top-actions">{session.role === 'admin' && <button className="top-maintenance" onClick={() => { setMaintenanceOpen(true); loadRequests(); }}><Icon name="settings" />{requests.length > 0 && <b>{requests.length}</b>}</button>}<div className="profile"><span>{(session.name || session.email).slice(0, 2).toUpperCase()}</span><div><strong>{session.name || session.email}</strong><small>{session.role === 'admin' ? 'Administrador' : 'Usuario'}</small></div></div></div>
+          <div className="top-actions">{session.role === 'admin' && <button className="top-maintenance" onClick={() => { setMaintenanceOpen(true); loadRequests(); }}><Icon name="settings" />{requests.length > 0 && <b>{requests.length}</b>}</button>}<div className="profile-menu"><button className="profile" onClick={() => setProfileOpen((open) => !open)} aria-expanded={profileOpen}><span>{(session.name || session.email).slice(0, 2).toUpperCase()}</span><div><strong>{session.name || session.email}</strong><small>{session.role === 'admin' ? 'Administrador' : 'Usuario'}</small></div><span className={`profile-chevron ${profileOpen ? 'open' : ''}`}>⌄</span></button>{profileOpen && <div className="profile-dropdown"><div><strong>{session.name || session.email}</strong><span>{session.email}</span></div><a href="/.auth/logout"><Icon name="logout" /> Cerrar sesión</a></div>}</div></div>
         </header>
 
         <main>
