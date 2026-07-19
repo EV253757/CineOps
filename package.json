@@ -1,0 +1,12 @@
+{
+  "name": "cineops",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": ["apps/*"],
+  "scripts": {
+    "dev": "npm run dev --workspace @cineops/api & npm run dev --workspace @cineops/web",
+    "build": "npm run build --workspace @cineops/web",
+    "start": "npm run start --workspace @cineops/api"
+  }
+}
+

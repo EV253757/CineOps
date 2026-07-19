@@ -1,0 +1,29 @@
+services:
+  cineops-api:
+    build: ./apps/api
+    image: cineops-api:local
+    restart: unless-stopped
+    environment:
+      PORT: 3001
+      DATABASE_PATH: /data/cineops.db
+      MEDIA_ROOTS: /media/peliculas-e;/media/peliculas-f;/media/peliculas-h
+      CORS_ORIGINS: http://localhost:5173
+    ports:
+      - "3001:3001"
+    volumes:
+      - ./data:/data
+      - ${MEDIA_E_PATH}:/media/peliculas-e:ro
+      - ${MEDIA_F_PATH}:/media/peliculas-f:ro
+      - ${MEDIA_H_PATH}:/media/peliculas-h:ro
+
+  jellyfin:
+    image: jellyfin/jellyfin:latest
+    restart: unless-stopped
+    ports:
+      - "8096:8096"
+    volumes:
+      - ./jellyfin-config:/config
+      - ./jellyfin-cache:/cache
+      - ${MEDIA_E_PATH}:/media/peliculas-e:ro
+      - ${MEDIA_F_PATH}:/media/peliculas-f:ro
+      - ${MEDIA_H_PATH}:/media/peliculas-h:ro
