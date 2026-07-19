@@ -281,6 +281,23 @@ app.post('/api/admin/users/:email/status', requireAdmin, (request, response) => 
   return response.json({ email, status });
 });
 
+app.delete('/api/admin/users/:email', requireAdmin, (request, response) => {
+  const email = decodeURIComponent(request.params.email).toLowerCase();
+  const user = currentAccess(email);
+  if (!user) return response.sendStatus(404);
+  if (user.role === 'admin') return response.status(400).json({ error: 'No se puede eliminar una cuenta administradora' });
+  db.exec('BEGIN');
+  try {
+    db.prepare('DELETE FROM access_users WHERE email=?').run(email);
+    db.prepare('DELETE FROM access_requests WHERE email=?').run(email);
+    db.exec('COMMIT');
+    return response.json({ email, status: 'deleted' });
+  } catch (error) {
+    db.exec('ROLLBACK');
+    throw error;
+  }
+});
+
 app.get('/api/health', (_request, response) => {
   response.json({ status: 'ok', libraries: MEDIA_ROOTS.length });
 });
