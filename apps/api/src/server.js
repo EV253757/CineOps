@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
+import { Readable } from 'node:stream';
 import { DatabaseSync } from 'node:sqlite';
 import cors from 'cors';
 import express from 'express';
@@ -14,6 +15,37 @@ const MEDIA_ROOTS = (process.env.MEDIA_ROOTS || '')
 const VIDEO_EXTENSIONS = new Set([
   '.avi', '.m2ts', '.m4v', '.mkv', '.mov', '.mp4', '.mpeg', '.mpg', '.ts', '.webm', '.wmv'
 ]);
+const JELLYFIN_URL = (process.env.JELLYFIN_URL || '').replace(/\/$/, '');
+const JELLYFIN_PUBLIC_URL = (process.env.JELLYFIN_PUBLIC_URL || '').replace(/\/$/, '');
+const JELLYFIN_API_KEY = process.env.JELLYFIN_API_KEY || '';
+
+async function jellyfinFetch(endpoint, options = {}) {
+  if (!JELLYFIN_URL || !JELLYFIN_API_KEY) throw new Error('Jellyfin no está configurado');
+  const headers = new Headers(options.headers || {});
+  headers.set('X-Emby-Token', JELLYFIN_API_KEY);
+  const response = await fetch(`${JELLYFIN_URL}${endpoint}`, { ...options, headers });
+  if (!response.ok) throw new Error(`Jellyfin respondió ${response.status}`);
+  return response;
+}
+
+function mapJellyfinItem(item) {
+  const source = item.MediaSources?.[0] || {};
+  return {
+    id: item.Id,
+    title: item.Name,
+    library: item.Path?.split(/[\\/]/).filter(Boolean).slice(-2, -1)[0] || 'Jellyfin',
+    extension: source.Container?.split(',')[0] || path.extname(item.Path || '').slice(1) || 'video',
+    size_bytes: source.Size || 0,
+    modified_at: item.DateCreated,
+    year: item.ProductionYear,
+    overview: item.Overview || '',
+    genres: item.Genres || [],
+    rating: item.CommunityRating,
+    has_image: Boolean(item.ImageTags?.Primary),
+    has_backdrop: Boolean(item.BackdropImageTags?.length),
+    jellyfin_url: JELLYFIN_PUBLIC_URL ? `${JELLYFIN_PUBLIC_URL}/web/#/details?id=${item.Id}` : null
+  };
+}
 
 fs.mkdirSync(path.dirname(DATABASE_PATH), { recursive: true });
 const db = new DatabaseSync(DATABASE_PATH);
@@ -110,15 +142,46 @@ app.get('/api/health', (_request, response) => {
   response.json({ status: 'ok', libraries: MEDIA_ROOTS.length });
 });
 
-app.get('/api/movies', (request, response) => {
+app.get('/api/movies', async (request, response, next) => {
   const search = String(request.query.search || '').trim();
   const limit = Math.min(Math.max(Number(request.query.limit) || 100, 1), 500);
+  if (JELLYFIN_URL && JELLYFIN_API_KEY) {
+    try {
+      const params = new URLSearchParams({
+        Recursive: 'true', IncludeItemTypes: 'Movie,Video',
+        Fields: 'Path,MediaSources,Overview,ProductionYear,Genres,CommunityRating,DateCreated',
+        ImageTypeLimit: '1', EnableImageTypes: 'Primary,Backdrop', Limit: String(limit),
+        SortBy: 'SortName', SortOrder: 'Ascending'
+      });
+      if (search) params.set('SearchTerm', search);
+      const jfResponse = await jellyfinFetch(`/Items?${params}`);
+      const data = await jfResponse.json();
+      const items = data.Items.map(mapJellyfinItem);
+      return response.json({ items, count: items.length, total: data.TotalRecordCount, source: 'jellyfin' });
+    } catch (error) {
+      return next(error);
+    }
+  }
   const rows = search
     ? db.prepare(`SELECT id, title, library, extension, size_bytes, modified_at
                   FROM movies WHERE title LIKE ? ORDER BY title LIMIT ?`).all(`%${search}%`, limit)
     : db.prepare(`SELECT id, title, library, extension, size_bytes, modified_at
                   FROM movies ORDER BY title LIMIT ?`).all(limit);
-  response.json({ items: rows, count: rows.length });
+  return response.json({ items: rows, count: rows.length, source: 'local' });
+});
+
+app.get('/api/movies/:id/image', async (request, response, next) => {
+  try {
+    const type = request.query.type === 'Backdrop' ? 'Backdrop' : 'Primary';
+    const width = Math.min(Math.max(Number(request.query.width) || 500, 100), 1920);
+    const jfResponse = await jellyfinFetch(`/Items/${encodeURIComponent(request.params.id)}/Images/${type}?maxWidth=${width}&quality=85`);
+    response.status(jfResponse.status);
+    response.setHeader('Content-Type', jfResponse.headers.get('content-type') || 'image/jpeg');
+    response.setHeader('Cache-Control', 'public, max-age=86400');
+    Readable.fromWeb(jfResponse.body).pipe(response);
+  } catch (error) {
+    next(error);
+  }
 });
 
 app.post('/api/libraries/scan', (_request, response, next) => {
@@ -130,6 +193,19 @@ app.post('/api/libraries/scan', (_request, response, next) => {
 });
 
 app.get('/api/movies/:id/stream', (request, response) => {
+  if (JELLYFIN_URL && JELLYFIN_API_KEY) {
+    const headers = request.headers.range ? { Range: request.headers.range } : {};
+    return jellyfinFetch(`/Videos/${encodeURIComponent(request.params.id)}/stream?static=true`, { headers })
+      .then((jfResponse) => {
+        response.status(jfResponse.status);
+        for (const header of ['accept-ranges', 'content-length', 'content-range', 'content-type']) {
+          const value = jfResponse.headers.get(header);
+          if (value) response.setHeader(header, value);
+        }
+        Readable.fromWeb(jfResponse.body).pipe(response);
+      })
+      .catch(() => response.sendStatus(502));
+  }
   const movie = getMovie.get(request.params.id);
   if (!movie || !fs.existsSync(movie.file_path)) return response.sendStatus(404);
 
@@ -169,4 +245,3 @@ app.listen(PORT, () => {
     console.warn('MEDIA_ROOTS está vacío; configura las bibliotecas antes de escanear.');
   }
 });
-

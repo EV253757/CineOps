@@ -36,10 +36,13 @@ function palette(seed = '') {
 
 function MovieArtwork({ movie, large = false }) {
   const colors = palette(movie?.title);
+  const imageType = large && movie?.has_backdrop ? 'Backdrop' : 'Primary';
+  const hasImage = imageType === 'Backdrop' ? movie?.has_backdrop : movie?.has_image;
   return (
     <div className={`artwork ${large ? 'large' : ''}`} style={{ '--accent': colors[0], '--deep': colors[1] }}>
+      {hasImage && <img src={`${API_URL}/api/movies/${movie.id}/image?type=${imageType}&width=${large ? 1600 : 500}`} alt="" />}
       <div className="art-glow" />
-      <span className="art-letter">{movie?.title?.[0] || 'C'}</span>
+      {!hasImage && <span className="art-letter">{movie?.title?.[0] || 'C'}</span>}
       <span className="format">{movie?.extension?.toUpperCase() || 'VIDEO'}</span>
       <div className="film-lines" />
     </div>
@@ -116,8 +119,8 @@ function App() {
             <div className="hero-content">
               <span className="featured-label"><i /> DESTACADA DE TU COLECCIÓN</span>
               <h1>{featured?.title || 'Tu cine, a tu manera'}</h1>
-              <p>Disponible en tu biblioteca privada. Reproduce en cualquier dispositivo autorizado y continúa donde lo dejaste.</p>
-              <div className="hero-meta"><span>4K / HD</span><i /> <span>{featured?.extension?.toUpperCase() || 'VIDEO'}</span><i /> <span>{formatSize(featured?.size_bytes)}</span></div>
+              <p>{featured?.overview || 'Disponible en tu biblioteca privada. Reproduce en cualquier dispositivo autorizado y continúa donde lo dejaste.'}</p>
+              <div className="hero-meta"><span>{featured?.year || 'TU COLECCIÓN'}</span><i /> <span>{featured?.extension?.toUpperCase() || 'VIDEO'}</span><i /> <span>{featured?.rating ? `★ ${featured.rating.toFixed(1)}` : formatSize(featured?.size_bytes)}</span></div>
               <div className="hero-actions">
                 <button className="primary" onClick={() => featured && setSelected(featured)}><Icon name="play" /> Reproducir</button>
                 <button className="secondary" onClick={() => document.querySelector('#catalogo')?.scrollIntoView({ behavior: 'smooth' })}><Icon name="info" /> Ver catálogo</button>
@@ -147,7 +150,7 @@ function App() {
                   <article className="movie-card" key={movie.id} onClick={() => setSelected(movie)}>
                     <MovieArtwork movie={movie} />
                     <button className="card-play" aria-label={`Reproducir ${movie.title}`}><Icon name="play" /></button>
-                    <div className="movie-copy"><h3>{movie.title}</h3><p><span>{movie.extension.toUpperCase()}</span> {formatSize(movie.size_bytes)} · {movie.library}</p></div>
+                    <div className="movie-copy"><h3>{movie.title}</h3><p><span>{movie.year || movie.extension.toUpperCase()}</span> {movie.rating ? `★ ${movie.rating.toFixed(1)} · ` : ''}{movie.library}</p></div>
                   </article>
                 ))}
               </div>
@@ -161,7 +164,7 @@ function App() {
           <div className="player-card">
             <button className="modal-close" onClick={() => setSelected(null)}><Icon name="close" /></button>
             <video controls autoPlay src={`${API_URL}/api/movies/${selected.id}/stream`} />
-            <div className="player-info"><div><span>REPRODUCIENDO AHORA</span><h2>{selected.title}</h2></div><p>{selected.library} · {formatSize(selected.size_bytes)}</p></div>
+            <div className="player-info"><div><span>REPRODUCIENDO AHORA</span><h2>{selected.title}</h2><p>{selected.overview}</p></div><div className="player-links"><p>{selected.library} · {formatSize(selected.size_bytes)}</p>{selected.jellyfin_url && <a href={selected.jellyfin_url} target="_blank" rel="noreferrer">Abrir en Jellyfin para transcodificar</a>}</div></div>
           </div>
         </div>
       )}
@@ -170,4 +173,3 @@ function App() {
 }
 
 createRoot(document.getElementById('root')).render(<App />);
-

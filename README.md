@@ -48,6 +48,10 @@ tailscale serve --bg --https=8443 http://127.0.0.1:8096
 
 Los dispositivos clientes deben tener Tailscale conectado al mismo tailnet.
 
+## Integración con Jellyfin
+
+La clave API se guarda únicamente en `.env` como `JELLYFIN_API_KEY` y se inyecta en el contenedor local. CineOps usa Jellyfin para metadatos, pósteres y fondos. La reproducción directa se sirve mediante la API privada; el enlace al reproductor oficial de Jellyfin permite transcodificación adaptativa sin exponer la clave en el navegador.
+
 ## Azure Static Web Apps
 
 Configuración de compilación:

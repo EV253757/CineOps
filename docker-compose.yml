@@ -8,6 +8,9 @@ services:
       DATABASE_PATH: /data/cineops.db
       MEDIA_ROOTS: /media/peliculas-e;/media/peliculas-f;/media/peliculas-h
       CORS_ORIGINS: http://localhost:5173,https://victorious-glacier-048221c0f.7.azurestaticapps.net
+      JELLYFIN_URL: http://jellyfin:8096
+      JELLYFIN_PUBLIC_URL: https://desktop-rl4mpvq.tail0584f0.ts.net:8443
+      JELLYFIN_API_KEY: ${JELLYFIN_API_KEY}
     ports:
       - "127.0.0.1:3001:3001"
     volumes:
@@ -15,6 +18,9 @@ services:
       - ${MEDIA_E_PATH}:/media/peliculas-e:ro
       - ${MEDIA_F_PATH}:/media/peliculas-f:ro
       - ${MEDIA_H_PATH}:/media/peliculas-h:ro
+    depends_on:
+      jellyfin:
+        condition: service_healthy
 
   jellyfin:
     image: jellyfin/jellyfin:latest
