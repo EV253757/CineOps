@@ -56,7 +56,7 @@ function App() {
   const [selected, setSelected] = useState(null);
   const [featured, setFeatured] = useState(null);
   const [status, setStatus] = useState('loading');
-  const [activeLibrary, setActiveLibrary] = useState('Todas');
+  const [activeGenre, setActiveGenre] = useState('Todas');
   const [session, setSession] = useState(null);
   const [accessToken, setAccessToken] = useState('');
   const [requests, setRequests] = useState([]);
@@ -136,10 +136,10 @@ function App() {
     return () => clearTimeout(timer);
   }, [search, session?.status, accessToken]);
 
-  const libraries = useMemo(() => ['Todas', ...new Set(movies.map((movie) => movie.library))], [movies]);
+  const genres = useMemo(() => ['Todas', ...new Set(movies.flatMap((movie) => movie.genres || []))].sort((a, b) => a === 'Todas' ? -1 : b === 'Todas' ? 1 : a.localeCompare(b, 'es')), [movies]);
   const visibleMovies = useMemo(
-    () => activeLibrary === 'Todas' ? movies : movies.filter((movie) => movie.library === activeLibrary),
-    [movies, activeLibrary]
+    () => activeGenre === 'Todas' ? movies : movies.filter((movie) => movie.genres?.includes(activeGenre)),
+    [movies, activeGenre]
   );
   const totalSize = useMemo(() => movies.reduce((sum, movie) => sum + Number(movie.size_bytes), 0), [movies]);
 
@@ -201,7 +201,7 @@ function App() {
 
             <div className="filter-row" id="bibliotecas">
               <div className="filters">
-                {libraries.map((library) => <button key={library} className={library === activeLibrary ? 'active' : ''} onClick={() => setActiveLibrary(library)}>{library}</button>)}
+                {genres.map((genre) => <button key={genre} className={genre === activeGenre ? 'active' : ''} onClick={() => setActiveGenre(genre)}>{genre}</button>)}
               </div>
               <span className="view-button"><Icon name="grid" /></span>
             </div>
@@ -214,7 +214,7 @@ function App() {
                   <article className="movie-card" key={movie.id} onClick={() => setSelected(movie)}>
                     <MovieArtwork movie={movie} token={accessToken} />
                     <button className="card-play" aria-label={`Reproducir ${movie.title}`}><Icon name="play" /></button>
-                    <div className="movie-copy"><h3>{movie.title}</h3><p><span>{movie.year || movie.extension.toUpperCase()}</span> {movie.rating ? `★ ${movie.rating.toFixed(1)} · ` : ''}{movie.library}</p></div>
+                    <div className="movie-copy"><h3>{movie.title}</h3><p><span>{movie.year || movie.extension.toUpperCase()}</span> {movie.rating ? `★ ${movie.rating.toFixed(1)} · ` : ''}{movie.genres?.slice(0, 2).join(' · ') || 'Sin género'}</p></div>
                   </article>
                 ))}
               </div>
@@ -230,7 +230,7 @@ function App() {
           <div className="player-card">
             <button className="modal-close" onClick={() => setSelected(null)}><Icon name="close" /></button>
             <video controls autoPlay src={`${API_URL}/api/movies/${selected.id}/stream?access_token=${encodeURIComponent(accessToken)}`} />
-            <div className="player-info"><div><span>REPRODUCIENDO AHORA</span><h2>{selected.title}</h2><p>{selected.overview}</p></div><div className="player-links"><p>{selected.library} · {formatSize(selected.size_bytes)}</p>{selected.jellyfin_url && <a href={selected.jellyfin_url} target="_blank" rel="noreferrer">Abrir en Jellyfin para transcodificar</a>}</div></div>
+            <div className="player-info"><div><span>REPRODUCIENDO AHORA</span><h2>{selected.title}</h2><p>{selected.overview}</p></div><div className="player-links"><p>{selected.genres?.join(' · ') || 'Sin género'} · {formatSize(selected.size_bytes)}</p>{selected.jellyfin_url && <a href={selected.jellyfin_url} target="_blank" rel="noreferrer">Abrir en Jellyfin para transcodificar</a>}</div></div>
           </div>
         </div>
       )}
