@@ -190,6 +190,17 @@ function cloudMovieId(blobName) {
   return `azure_${crypto.createHash('sha256').update(blobName).digest('hex').slice(0, 24)}`;
 }
 
+function movieIdentity(title = '') {
+  return title
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/\b(19|20)\d{2}\b/g, '')
+    .replace(/\b(2160p|1080p|720p|4k|uhd|bluray|web[ .-]?dl|webrip|dual|latino|lat|cinecalidad|rip|hdr|x26[45])\b/g, '')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+}
+
 function metadataGenres(value = '') {
   if (!value) return [];
   try {
@@ -197,6 +208,10 @@ function metadataGenres(value = '') {
     if (Array.isArray(parsed)) return parsed.map(String);
   } catch {}
   return value.split(',').map((genre) => genre.trim()).filter(Boolean);
+}
+
+function metadataText(value = '') {
+  try { return decodeURIComponent(value); } catch { return value; }
 }
 
 async function cloudMovies(force = false) {
@@ -212,7 +227,7 @@ async function cloudMovies(force = false) {
     names.set(id, blob.name);
     items.push({
       id,
-      title: blob.metadata?.title || movieTitle(blob.name),
+      title: metadataText(blob.metadata?.title) || movieTitle(blob.name),
       library: 'Azure',
       extension,
       size_bytes: blob.properties.contentLength || 0,
@@ -390,6 +405,79 @@ app.delete('/api/admin/users/:email', requireAdmin, (request, response) => {
   }
 });
 
+app.get('/api/admin/cloud', requireAdmin, async (_request, response, next) => {
+  try {
+    const items = await cloudMovies(true);
+    const usedBytes = items.reduce((sum, item) => sum + Number(item.size_bytes || 0), 0);
+    response.json({ items, used_bytes: usedBytes, limit_bytes: 100 * 1024 ** 3 });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post('/api/admin/cloud/upload-url', requireAdmin, async (request, response, next) => {
+  try {
+    if (!blobCredential || !blobContainer) return response.status(503).json({ error: 'Azure Blob no está configurado' });
+    const title = String(request.body?.name || '').trim();
+    const size = Number(request.body?.size || 0);
+    const extension = path.extname(title).toLowerCase();
+    if (!title || !VIDEO_EXTENSIONS.has(extension) || !Number.isFinite(size) || size <= 0) {
+      return response.status(400).json({ error: 'Selecciona un archivo de video válido' });
+    }
+    const items = await cloudMovies(true);
+    const usedBytes = items.reduce((sum, item) => sum + Number(item.size_bytes || 0), 0);
+    const limitBytes = 100 * 1024 ** 3;
+    if (usedBytes + size > limitBytes) {
+      return response.status(409).json({ error: 'La carga superaría el límite operativo de 100 GB', used_bytes: usedBytes, limit_bytes: limitBytes });
+    }
+    const blobName = `uploads/${crypto.randomUUID()}${extension}`;
+    const startsOn = new Date(Date.now() - 60_000);
+    const expiresOn = new Date(Date.now() + 60 * 60_000);
+    const sas = generateBlobSASQueryParameters({
+      containerName: AZURE_STORAGE_CONTAINER,
+      blobName,
+      permissions: BlobSASPermissions.parse('cw'),
+      startsOn,
+      expiresOn,
+      protocol: 'https'
+    }, blobCredential).toString();
+    response.json({
+      blob_name: blobName,
+      upload_url: `${blobContainer.getBlockBlobClient(blobName).url}?${sas}`,
+      expires_at: expiresOn.toISOString()
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post('/api/admin/cloud/finalize', requireAdmin, async (request, response, next) => {
+  try {
+    const blobName = String(request.body?.blob_name || '');
+    const title = String(request.body?.title || '').trim();
+    if (!blobName.startsWith('uploads/') || !title) return response.status(400).json({ error: 'Carga inválida' });
+    const client = blobContainer.getBlockBlobClient(blobName);
+    if (!(await client.exists())) return response.sendStatus(404);
+    await client.setMetadata({ title: encodeURIComponent(movieTitle(title)) });
+    cloudCache.expiresAt = 0;
+    response.json({ status: 'ready', id: cloudMovieId(blobName) });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.delete('/api/admin/cloud/:id', requireAdmin, async (request, response, next) => {
+  try {
+    const blobName = await cloudBlobName(request.params.id);
+    if (!blobName) return response.sendStatus(404);
+    await blobContainer.deleteBlob(blobName);
+    cloudCache.expiresAt = 0;
+    response.json({ status: 'deleted', id: request.params.id });
+  } catch (error) {
+    next(error);
+  }
+});
+
 app.get('/api/health', (_request, response) => {
   response.json({ status: 'ok', libraries: MEDIA_ROOTS.length, azure_blob: Boolean(blobContainer) });
 });
@@ -399,6 +487,7 @@ app.get('/api/movies', requireUser, async (request, response, next) => {
   const limit = Math.min(Math.max(Number(request.query.limit) || 100, 1), 500);
   let primaryItems = [];
   let primarySource = 'local';
+  let localAvailable = true;
   if (JELLYFIN_URL && JELLYFIN_API_KEY) {
     try {
       const params = new URLSearchParams({
@@ -413,7 +502,8 @@ app.get('/api/movies', requireUser, async (request, response, next) => {
       primaryItems = data.Items.map(mapJellyfinItem);
       primarySource = 'jellyfin';
     } catch (error) {
-      return next(error);
+      localAvailable = false;
+      console.warn(`Jellyfin no está disponible: ${error.message}`);
     }
   } else {
     primaryItems = search
@@ -426,13 +516,28 @@ app.get('/api/movies', requireUser, async (request, response, next) => {
   try {
     const azureItems = (await cloudMovies()).filter((movie) => !search
       || movie.title.toLocaleLowerCase('es').includes(search.toLocaleLowerCase('es')));
-    const items = [...primaryItems, ...azureItems]
+    const localTitles = new Set(primaryItems.map((movie) => movieIdentity(movie.title)));
+    const visibleAzureItems = localAvailable
+      ? azureItems.filter((movie) => !localTitles.has(movieIdentity(movie.title)))
+      : azureItems;
+    const items = [...primaryItems, ...visibleAzureItems]
       .sort((a, b) => a.title.localeCompare(b.title, 'es'))
       .slice(0, limit);
-    return response.json({ items, count: items.length, source: azureItems.length ? `${primarySource}+azure` : primarySource });
+    return response.json({
+      items,
+      count: items.length,
+      source: visibleAzureItems.length ? `${primarySource}+azure` : primarySource,
+      availability: { local: localAvailable, azure: true }
+    });
   } catch (error) {
     console.warn(`No se pudo consultar Azure Blob: ${error.message}`);
-    return response.json({ items: primaryItems, count: primaryItems.length, source: primarySource, azure_error: true });
+    return response.json({
+      items: primaryItems,
+      count: primaryItems.length,
+      source: primarySource,
+      availability: { local: localAvailable, azure: false },
+      azure_error: true
+    });
   }
 });
 
