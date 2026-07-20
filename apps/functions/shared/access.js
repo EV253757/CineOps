@@ -25,7 +25,9 @@ const requests = () => table('accessrequests');
 const rowKey = (email) => Buffer.from(email.toLowerCase()).toString('base64url');
 
 function principal(req) {
-  const encoded = req.headers['x-ms-client-principal'];
+  const encoded = req.headers?.['x-ms-client-principal']
+    || req.headers?.['X-MS-CLIENT-PRINCIPAL']
+    || req.headers?.get?.('x-ms-client-principal');
   if (!encoded) return null;
   const value = JSON.parse(Buffer.from(encoded, 'base64').toString('utf8'));
   const email = String(value.userDetails || '').trim().toLowerCase();

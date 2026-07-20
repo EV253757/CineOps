@@ -157,8 +157,11 @@ function App() {
       const identityResponse = await fetch("/api/access/session", {
         cache: "no-store",
       });
-      if (!identityResponse.ok) throw new Error("Microsoft no autenticado");
-      const data = await identityResponse.json();
+      const data = await identityResponse.json().catch(() => ({}));
+      if (!identityResponse.ok) {
+        const detail = data.diagnostic ? ` (${data.diagnostic})` : "";
+        throw new Error(`${data.error || "Microsoft no autenticado"}${detail}`);
+      }
       setSession(data);
       setAccessToken(data.access_token);
     } catch (error) {

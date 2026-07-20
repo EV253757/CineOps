@@ -30,6 +30,10 @@ module.exports = async function (context, req) {
     };
   } catch (error) {
     context.log.error(error);
-    context.res = { status: 500, jsonBody: { error: 'No se pudo crear la sesión Azure' } };
+    const diagnostic = [error.code, error.statusCode, error.name].filter(Boolean).join(' / ');
+    context.res = {
+      status: 500,
+      jsonBody: { error: 'No se pudo crear la sesión Azure', diagnostic: diagnostic || 'FUNCTION_ERROR' }
+    };
   }
 };
