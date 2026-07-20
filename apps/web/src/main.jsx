@@ -4,6 +4,37 @@ import "./styles.css";
 
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:3001";
 
+class AppErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { error: null };
+  }
+
+  static getDerivedStateFromError(error) {
+    return { error };
+  }
+
+  componentDidCatch(error, info) {
+    console.error("CineOps render error", error, info);
+  }
+
+  render() {
+    if (!this.state.error) return this.props.children;
+    return (
+      <div className="access-screen">
+        <div className="access-card">
+          <span className="access-logo">C</span>
+          <small>RECUPERACIÓN</small>
+          <h1>No pudimos cargar CineOps</h1>
+          <p>{this.state.error.message || "Error inesperado del navegador"}</p>
+          <button onClick={() => window.location.reload()}>Intentar nuevamente</button>
+          <a href="/.auth/logout?post_logout_redirect_uri=/">Reiniciar sesión Microsoft</a>
+        </div>
+      </div>
+    );
+  }
+}
+
 const Icon = ({ name }) => {
   const paths = {
     home: (
@@ -973,4 +1004,8 @@ function App() {
   );
 }
 
-createRoot(document.getElementById("root")).render(<App />);
+createRoot(document.getElementById("root")).render(
+  <AppErrorBoundary>
+    <App />
+  </AppErrorBoundary>,
+);
