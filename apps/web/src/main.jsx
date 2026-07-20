@@ -112,6 +112,17 @@ function formatSize(bytes) {
     : `${(value / 1024 ** 2).toFixed(0)} MB`;
 }
 
+function movieKey(title = "") {
+  return title
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/\b(19|20)\d{2}\b/g, "")
+    .replace(/\b(2160p|1080p|720p|4k|uhd|bluray|web.?dl|webrip|dual|latino|x26[45])\b/g, "")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
 function palette(seed = "") {
   const palettes = [
     ["#ef4444", "#450a0a"],
@@ -155,6 +166,9 @@ function MovieArtwork({ movie, large = false, token = "" }) {
       <span className="format">
         {movie?.extension?.toUpperCase() || "VIDEO"}
       </span>
+      {(movie?.source === "azure" || movie?.id?.startsWith("azure_")) && (
+        <span className="online-badge">ONLINE</span>
+      )}
       <div className="film-lines" />
     </div>
   );
@@ -449,8 +463,15 @@ function App() {
       ]);
       if (!localData && !azureData) throw new Error("Bibliotecas no disponibles");
       const combined = new Map();
-      for (const movie of localData?.items || []) combined.set(movie.id, movie);
-      for (const movie of azureData?.items || []) combined.set(movie.id, movie);
+      const onlineItems = azureData?.items || [];
+      const onlineTitles = new Set(onlineItems.map((movie) => movieKey(movie.title)));
+      for (const movie of onlineItems) combined.set(movie.id, movie);
+      for (const movie of localData?.items || []) {
+        const alreadyOnline = onlineTitles.has(movieKey(movie.title));
+        const duplicatedAzureItem = Boolean(azureData && movie.id?.startsWith("azure_"));
+        if (alreadyOnline || duplicatedAzureItem) continue;
+        combined.set(movie.id, movie);
+      }
       const items = [...combined.values()].sort((a, b) => a.title.localeCompare(b.title, "es"));
       setMovies(items);
       setLibraryAvailability({

@@ -1039,6 +1039,22 @@ kbd {
   font-weight: 800;
   letter-spacing: 1px;
 }
+.online-badge {
+  position: absolute;
+  z-index: 3;
+  top: 11px;
+  left: 10px;
+  padding: 5px 8px;
+  border: 1px solid rgba(52, 211, 153, 0.48);
+  border-radius: 999px;
+  background: rgba(5, 46, 34, 0.86);
+  color: #6ee7b7;
+  font-size: 8px;
+  font-weight: 900;
+  letter-spacing: 1.1px;
+  box-shadow: 0 6px 20px rgba(16, 185, 129, 0.2);
+  backdrop-filter: blur(8px);
+}
 .film-lines {
   position: absolute;
   inset: 0;
