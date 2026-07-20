@@ -132,9 +132,11 @@ function MovieArtwork({ movie, large = false, token = "" }) {
   const imageType = large && movie?.has_backdrop ? "Backdrop" : "Primary";
   const hasImage =
     imageType === "Backdrop" ? movie?.has_backdrop : movie?.has_image;
-  const imageUrl = movie?.id?.startsWith("azure_")
-    ? `/api/cloud/movies/${encodeURIComponent(movie.id)}/image`
-    : `${API_URL}/api/movies/${movie.id}/image?type=${imageType}&width=${large ? 1600 : 500}&access_token=${encodeURIComponent(token)}`;
+  const imageUrl = !movie?.id
+    ? ""
+    : movie.id.startsWith("azure_")
+      ? `/api/cloud/movies/${encodeURIComponent(movie.id)}/image`
+      : `${API_URL}/api/movies/${movie.id}/image?type=${imageType}&width=${large ? 1600 : 500}&access_token=${encodeURIComponent(token)}`;
   return (
     <div
       className={`artwork ${large ? "large" : ""}`}
