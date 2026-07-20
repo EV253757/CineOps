@@ -1,6 +1,7 @@
 const sessionFunction = require('../apps/functions/access-session');
 const adminFunction = require('../apps/functions/access-admin');
 const cloudFunction = require('../apps/functions/cloud-media');
+const cloudAdminFunction = require('../apps/functions/cloud-admin');
 
 const email = String(process.env.ADMIN_EMAIL || '').toLowerCase();
 if (!email) throw new Error('ADMIN_EMAIL es requerido');
@@ -26,9 +27,13 @@ async function smoke() {
   const cloud = await invoke(cloudFunction, { method: 'GET', query: {} });
   if (cloud.status && cloud.status >= 400) throw new Error(`Catálogo Azure: HTTP ${cloud.status}`);
   const cloudBody = cloud.jsonBody || JSON.parse(cloud.body);
+  const cloudAdmin = await invoke(cloudAdminFunction, { method: 'GET' });
+  if (cloudAdmin.status && cloudAdmin.status >= 400) throw new Error(`Administración Azure: HTTP ${cloudAdmin.status}`);
+  const cloudAdminBody = cloudAdmin.jsonBody || JSON.parse(cloudAdmin.body);
   console.log(JSON.stringify({
     session: 'ok', users: usersBody.items.length,
-    pendingRequests: requestsBody.items.length, cloudMovies: cloudBody.items.length
+    pendingRequests: requestsBody.items.length, cloudMovies: cloudBody.items.length,
+    cloudUsedBytes: cloudAdminBody.used_bytes
   }));
 }
 

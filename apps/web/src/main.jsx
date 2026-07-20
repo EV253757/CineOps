@@ -202,7 +202,7 @@ function App() {
     const [requestResponse, usersResponse, cloudResponse] = await Promise.all([
       accessFetch("/api/access/admin/requests", "/api/admin/requests"),
       accessFetch("/api/access/admin/users", "/api/admin/users"),
-      fetch(`${API_URL}/api/admin/cloud`, { headers }),
+      cloudAdminFetch("", { headers }),
     ]);
     if (requestResponse.ok) setRequests((await requestResponse.json()).items);
     if (usersResponse.ok) setUsers((await usersResponse.json()).items);
@@ -218,6 +218,15 @@ function App() {
     return fetch(`${API_URL}${localPath}`, { ...options, headers });
   }
 
+  async function cloudAdminFetch(path = "", options = {}) {
+    const headers = { Authorization: `Bearer ${accessToken}`, ...options.headers };
+    try {
+      const response = await fetch(`/api/cloud/admin${path}`, { ...options, headers });
+      if (response.ok || [400, 409].includes(response.status)) return response;
+    } catch {}
+    return fetch(`${API_URL}/api/admin/cloud${path}`, { ...options, headers });
+  }
+
   async function uploadCloudMovie(event) {
     const file = event.target.files?.[0];
     event.target.value = "";
@@ -226,8 +235,8 @@ function App() {
     setUploadProgress(0);
     let grant = null;
     try {
-      const authorization = await fetch(
-        `${API_URL}/api/admin/cloud/upload-url`,
+      const authorization = await cloudAdminFetch(
+        "/upload-url",
         {
           method: "POST",
           headers: {
@@ -259,7 +268,7 @@ function App() {
         onProgress: ({ loadedBytes }) =>
           setUploadProgress(Math.round((loadedBytes / file.size) * 100)),
       });
-      const finalize = await fetch(`${API_URL}/api/admin/cloud/finalize`, {
+      const finalize = await cloudAdminFetch("/finalize", {
         method: "POST",
         headers: {
           Authorization: `Bearer ${accessToken}`,
@@ -276,7 +285,7 @@ function App() {
       await Promise.all([loadRequests(), loadMovies(search)]);
     } catch (error) {
       if (grant?.blob_name) {
-        await fetch(`${API_URL}/api/admin/cloud/cancel`, {
+        await cloudAdminFetch("/cancel", {
           method: "POST",
           headers: {
             Authorization: `Bearer ${accessToken}`,
@@ -306,8 +315,8 @@ function App() {
 
   async function deleteCloudMovie(movie) {
     if (!window.confirm(`¿Eliminar ${movie.title} de Azure?`)) return;
-    const response = await fetch(
-      `${API_URL}/api/admin/cloud/${encodeURIComponent(movie.id)}`,
+    const response = await cloudAdminFetch(
+      `/${encodeURIComponent(movie.id)}`,
       {
         method: "DELETE",
         headers: { Authorization: `Bearer ${accessToken}` },
@@ -321,8 +330,8 @@ function App() {
 
   async function enrichCloudMovie(movie) {
     setCloudMessage(`Buscando ficha de ${movie.title}…`);
-    const response = await fetch(
-      `${API_URL}/api/admin/cloud/${encodeURIComponent(movie.id)}/enrich`,
+    const response = await cloudAdminFetch(
+      `/${encodeURIComponent(movie.id)}/enrich`,
       { method: "POST", headers: { Authorization: `Bearer ${accessToken}` } },
     );
     if (response.ok) {

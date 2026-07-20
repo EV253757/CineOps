@@ -61,4 +61,4 @@ function readUrl(blobName) {
   return `${container.getBlobClient(blobName).url}?${sas}`;
 }
 
-module.exports = { find, movies, readUrl };
+module.exports = { container, containerName, credential, find, movieId, movies, readUrl, title };
