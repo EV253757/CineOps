@@ -2,7 +2,7 @@
 
 ## En curso
 
-- Mover las operaciones administrativas de Blob (carga, finalización y eliminación) a Azure Functions.
+- Sustituir la obtención de metadatos desde Jellyfin por un proveedor accesible desde Azure.
 - Mantener la alerta de servidor local desconectado visible únicamente al administrador dentro de Mantenimiento.
 - Conservar Jellyfin/local para reproducción, subtítulos y transcodificación.
 
@@ -12,6 +12,7 @@
 - Mantenimiento separado en “Usuarios y accesos” y “Películas y almacenamiento”.
 - Consulta local-first con catálogo Azure como respaldo y eliminación de duplicados por identificador.
 - Listado, carátulas y enlaces temporales de lectura de Blob servidos mediante Azure Functions.
+- Carga directa, finalización, cancelación, limpieza, medición de espacio y eliminación de Blob administradas mediante Azure Functions.
 - Jellyfin permanece como motor local de reproducción y transcodificación.
 
 ## Costos y beneficio gratuito
@@ -26,7 +27,8 @@
 ## Próximas etapas
 
 1. Confirmar desde dos cuentas que la administración de accesos funciona sin depender del PC.
-2. Migrar carga, finalización, cancelación y eliminación de Blob a Functions.
-3. Mostrar el origen de cada película únicamente al administrador.
-4. Añadir métricas de disponibilidad, almacenamiento y transferencia en Mantenimiento.
-5. Evaluar VM Azure, OCI o arquitectura multinube únicamente para transcodificación, comparando el costo posterior a promociones.
+2. Integrar metadatos y carátulas sin depender de Jellyfin.
+3. Definir una política de formatos compatibles o conversión previa para evitar transcodificación en Azure.
+4. Mostrar el origen de cada película únicamente al administrador.
+5. Añadir métricas de disponibilidad, almacenamiento y transferencia en Mantenimiento.
+6. Evaluar VM Azure, OCI o arquitectura multinube únicamente para transcodificación, comparando el costo posterior a promociones.
