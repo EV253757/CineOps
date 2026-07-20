@@ -158,12 +158,29 @@ function App() {
         cache: "no-store",
       });
       const data = await identityResponse.json().catch(() => ({}));
-      if (!identityResponse.ok) {
-        const detail = data.diagnostic ? ` (${data.diagnostic})` : "";
-        throw new Error(`${data.error || "Microsoft no autenticado"}${detail}`);
+      if (identityResponse.ok && data.access_token) {
+        setSession(data);
+        setAccessToken(data.access_token);
+        return;
       }
-      setSession(data);
-      setAccessToken(data.access_token);
+
+      const legacyIdentity = await fetch("/api/auth/token", { cache: "no-store" });
+      const identity = await legacyIdentity.json().catch(() => ({}));
+      if (!legacyIdentity.ok || !identity.token) {
+        throw new Error(`Microsoft no autenticado (HTTP ${legacyIdentity.status})`);
+      }
+      const exchange = await fetch(`${API_URL}/api/auth/exchange`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ token: identity.token }),
+      });
+      const legacySession = await exchange.json().catch(() => ({}));
+      if (!exchange.ok) {
+        throw new Error(`${legacySession.error || "No se pudo crear la sesión"} (HTTP ${exchange.status})`);
+      }
+      setSession(legacySession);
+      setAccessToken(legacySession.access_token);
     } catch (error) {
       setSession({ status: "error", error: error.message });
     }
