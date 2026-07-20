@@ -1,5 +1,5 @@
 const {
-  publicRequest, publicUser, requests, requireAdmin, rowKey, users
+  finalizeJson, publicRequest, publicUser, requests, requireAdmin, rowKey, users
 } = require('../shared/access');
 
 async function list(client, partitionKey) {
@@ -87,5 +87,7 @@ module.exports = async function (context, req) {
   } catch (error) {
     context.log.error(error);
     context.res = { status: error.statusCode === 404 ? 404 : 500, jsonBody: { error: 'Error administrando accesos Azure' } };
+  } finally {
+    finalizeJson(context);
   }
 };

@@ -1,7 +1,7 @@
 const crypto = require('crypto');
 const path = require('path');
 const { BlobSASPermissions, generateBlobSASQueryParameters } = require('@azure/storage-blob');
-const { requireAdmin } = require('../shared/access');
+const { finalizeJson, requireAdmin } = require('../shared/access');
 const { container, containerName, credential, find, movieId, movies, title: movieTitle } = require('../shared/blob');
 
 const extensions = new Set(['.mp4', '.mkv', '.avi', '.mov', '.m4v', '.webm', '.m2ts']);
@@ -77,5 +77,7 @@ module.exports = async function (context, req) {
   } catch (error) {
     context.log.error(error);
     context.res = { status: 500, jsonBody: { error: 'No se pudo administrar Azure Blob' } };
+  } finally {
+    finalizeJson(context);
   }
 };

@@ -237,9 +237,13 @@ function App() {
       accessFetch("/api/access/admin/users", "/api/admin/users"),
       cloudAdminFetch("", { headers }),
     ]);
-    if (requestResponse.ok) setRequests((await requestResponse.json()).items);
-    if (usersResponse.ok) setUsers((await usersResponse.json()).items);
-    if (cloudResponse.ok) setCloudLibrary(await cloudResponse.json());
+    const safeJson = async (response) => response?.ok ? response.json().catch(() => null) : null;
+    const [requestData, usersData, cloudData] = await Promise.all([
+      safeJson(requestResponse), safeJson(usersResponse), safeJson(cloudResponse),
+    ]);
+    if (requestData?.items) setRequests(requestData.items);
+    if (usersData?.items) setUsers(usersData.items);
+    if (cloudData?.items) setCloudLibrary(cloudData);
   }
 
   async function mutateAccess(azurePath, localPath, options) {
@@ -439,8 +443,10 @@ function App() {
       ]);
       const localResponse = localResult.status === "fulfilled" ? localResult.value : null;
       const azureResponse = azureResult.status === "fulfilled" ? azureResult.value : null;
-      const localData = localResponse?.ok ? await localResponse.json() : null;
-      const azureData = azureResponse?.ok ? await azureResponse.json() : null;
+      const [localData, azureData] = await Promise.all([
+        localResponse?.ok ? localResponse.json().catch(() => null) : null,
+        azureResponse?.ok ? azureResponse.json().catch(() => null) : null,
+      ]);
       if (!localData && !azureData) throw new Error("Bibliotecas no disponibles");
       const combined = new Map();
       for (const movie of localData?.items || []) combined.set(movie.id, movie);

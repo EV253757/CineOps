@@ -1,4 +1,4 @@
-const { ensureAdmin, getUser, principal, requests, rowKey, sign } = require('../shared/access');
+const { ensureAdmin, finalizeJson, getUser, principal, requests, rowKey, sign } = require('../shared/access');
 
 module.exports = async function (context, req) {
   try {
@@ -35,5 +35,7 @@ module.exports = async function (context, req) {
       status: 500,
       jsonBody: { error: 'No se pudo crear la sesión Azure', diagnostic: diagnostic || 'FUNCTION_ERROR' }
     };
+  } finally {
+    finalizeJson(context);
   }
 };

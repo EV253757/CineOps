@@ -89,7 +89,14 @@ function publicRequest(entity) {
   };
 }
 
+function finalizeJson(context) {
+  if (!context.res || context.res.jsonBody === undefined) return;
+  context.res.headers = { 'Content-Type': 'application/json', ...(context.res.headers || {}) };
+  context.res.body = JSON.stringify(context.res.jsonBody);
+  delete context.res.jsonBody;
+}
+
 module.exports = {
-  adminEmail, ensureAdmin, getUser, principal, publicRequest, publicUser,
+  adminEmail, ensureAdmin, finalizeJson, getUser, principal, publicRequest, publicUser,
   requests, requireAdmin, requireUser, rowKey, sign, users
 };

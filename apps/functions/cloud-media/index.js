@@ -1,4 +1,4 @@
-const { requireUser } = require('../shared/access');
+const { finalizeJson, requireUser } = require('../shared/access');
 const { find, movies, readUrl } = require('../shared/blob');
 
 module.exports = async function (context, req) {
@@ -24,5 +24,7 @@ module.exports = async function (context, req) {
   } catch (error) {
     context.log.error(error);
     context.res = { status: 500, jsonBody: { error: 'No se pudo consultar la biblioteca Azure' } };
+  } finally {
+    finalizeJson(context);
   }
 };
