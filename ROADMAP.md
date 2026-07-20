@@ -2,11 +2,17 @@
 
 ## En curso
 
-- Mover usuarios, solicitudes, roles y sesiones a Azure Static Web Apps, Functions y Table Storage.
-- Mantener la consulta local como primera opción para ahorrar transferencia y usar Azure Blob como respaldo cuando la película no esté disponible localmente.
+- Mover las operaciones administrativas de Blob (carga, finalización y eliminación) a Azure Functions.
 - Mantener la alerta de servidor local desconectado visible únicamente al administrador dentro de Mantenimiento.
-- Separar Mantenimiento en “Usuarios y accesos” y “Películas y almacenamiento”.
 - Conservar Jellyfin/local para reproducción, subtítulos y transcodificación.
+
+## Completado
+
+- Usuarios, solicitudes, roles y sesiones disponibles en Azure Tables con respaldo local.
+- Mantenimiento separado en “Usuarios y accesos” y “Películas y almacenamiento”.
+- Consulta local-first con catálogo Azure como respaldo y eliminación de duplicados por identificador.
+- Listado, carátulas y enlaces temporales de lectura de Blob servidos mediante Azure Functions.
+- Jellyfin permanece como motor local de reproducción y transcodificación.
 
 ## Costos y beneficio gratuito
 
@@ -19,8 +25,8 @@
 
 ## Próximas etapas
 
-1. Desplegar y probar la administración de accesos independiente del PC local.
-2. Migrar catálogo y URLs seguras de Blob a Functions para que Azure siga navegable si el PC se apaga.
-3. Implementar selección local-first/Azure-fallback por película y mostrar el origen solo al administrador.
+1. Confirmar desde dos cuentas que la administración de accesos funciona sin depender del PC.
+2. Migrar carga, finalización, cancelación y eliminación de Blob a Functions.
+3. Mostrar el origen de cada película únicamente al administrador.
 4. Añadir métricas de disponibilidad, almacenamiento y transferencia en Mantenimiento.
 5. Evaluar VM Azure, OCI o arquitectura multinube únicamente para transcodificación, comparando el costo posterior a promociones.
