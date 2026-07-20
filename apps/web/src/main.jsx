@@ -101,6 +101,9 @@ function MovieArtwork({ movie, large = false, token = "" }) {
   const imageType = large && movie?.has_backdrop ? "Backdrop" : "Primary";
   const hasImage =
     imageType === "Backdrop" ? movie?.has_backdrop : movie?.has_image;
+  const imageUrl = movie?.id?.startsWith("azure_")
+    ? `/api/cloud/movies/${encodeURIComponent(movie.id)}/image`
+    : `${API_URL}/api/movies/${movie.id}/image?type=${imageType}&width=${large ? 1600 : 500}&access_token=${encodeURIComponent(token)}`;
   return (
     <div
       className={`artwork ${large ? "large" : ""}`}
@@ -108,7 +111,7 @@ function MovieArtwork({ movie, large = false, token = "" }) {
     >
       {hasImage && (
         <img
-          src={`${API_URL}/api/movies/${movie.id}/image?type=${imageType}&width=${large ? 1600 : 500}&access_token=${encodeURIComponent(token)}`}
+          src={imageUrl}
           alt=""
         />
       )}
@@ -386,17 +389,27 @@ function App() {
   async function loadMovies(query = "") {
     setStatus("loading");
     try {
-      const response = await fetch(
-        `${API_URL}/api/movies?limit=500&search=${encodeURIComponent(query)}`,
-        { headers: { Authorization: `Bearer ${accessToken}` } },
-      );
-      if (!response.ok) throw new Error("API no disponible");
-      const data = await response.json();
-      setMovies(data.items);
-      setLibraryAvailability(
-        data.availability || { local: true, azure: false },
-      );
-      setFeatured((current) => current || data.items[0]);
+      const [localResult, azureResult] = await Promise.allSettled([
+        fetch(`${API_URL}/api/movies?limit=500&search=${encodeURIComponent(query)}`, {
+          headers: { Authorization: `Bearer ${accessToken}` },
+        }),
+        fetch(`/api/cloud/movies?search=${encodeURIComponent(query)}`, { cache: "no-store" }),
+      ]);
+      const localResponse = localResult.status === "fulfilled" ? localResult.value : null;
+      const azureResponse = azureResult.status === "fulfilled" ? azureResult.value : null;
+      const localData = localResponse?.ok ? await localResponse.json() : null;
+      const azureData = azureResponse?.ok ? await azureResponse.json() : null;
+      if (!localData && !azureData) throw new Error("Bibliotecas no disponibles");
+      const combined = new Map();
+      for (const movie of localData?.items || []) combined.set(movie.id, movie);
+      for (const movie of azureData?.items || []) combined.set(movie.id, movie);
+      const items = [...combined.values()].sort((a, b) => a.title.localeCompare(b.title, "es"));
+      setMovies(items);
+      setLibraryAvailability({
+        local: Boolean(localData?.availability?.local),
+        azure: Boolean(azureData || localData?.availability?.azure),
+      });
+      setFeatured((current) => current && items.some((item) => item.id === current.id) ? current : items[0]);
       setStatus("ready");
     } catch {
       setStatus("offline");
@@ -918,7 +931,9 @@ function App() {
             <video
               controls
               autoPlay
-              src={`${API_URL}/api/movies/${selected.id}/stream?access_token=${encodeURIComponent(accessToken)}`}
+              src={selected.id.startsWith("azure_")
+                ? `/api/cloud/movies/${encodeURIComponent(selected.id)}/stream`
+                : `${API_URL}/api/movies/${selected.id}/stream?access_token=${encodeURIComponent(accessToken)}`}
             />
             <div className="player-info">
               <div>

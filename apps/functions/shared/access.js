@@ -65,6 +65,16 @@ async function requireAdmin(req) {
   return access?.role === 'admin' && access?.status === 'approved' ? { ...identity, ...access } : null;
 }
 
+async function requireUser(req) {
+  const identity = principal(req);
+  if (!identity) return null;
+  await ensureAdmin(identity);
+  const access = await getUser(identity.email);
+  return access?.status === 'approved' && ['admin', 'user'].includes(access?.role)
+    ? { ...identity, ...access }
+    : null;
+}
+
 function publicUser(entity) {
   return {
     email: entity.email, display_name: entity.displayName, role: entity.role,
@@ -81,5 +91,5 @@ function publicRequest(entity) {
 
 module.exports = {
   adminEmail, ensureAdmin, getUser, principal, publicRequest, publicUser,
-  requests, requireAdmin, rowKey, sign, users
+  requests, requireAdmin, requireUser, rowKey, sign, users
 };
