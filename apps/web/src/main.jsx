@@ -287,6 +287,18 @@ function App() {
     } else setCloudMessage("No se pudo eliminar la película.");
   }
 
+  async function enrichCloudMovie(movie) {
+    setCloudMessage(`Buscando ficha de ${movie.title}…`);
+    const response = await fetch(
+      `${API_URL}/api/admin/cloud/${encodeURIComponent(movie.id)}/enrich`,
+      { method: "POST", headers: { Authorization: `Bearer ${accessToken}` } },
+    );
+    if (response.ok) {
+      setCloudMessage("Carátula y metadatos actualizados.");
+      await Promise.all([loadRequests(), loadMovies(search)]);
+    } else setCloudMessage("No se encontró una ficha compatible en Jellyfin.");
+  }
+
   async function approve(email) {
     const response = await fetch(
       `${API_URL}/api/admin/requests/${encodeURIComponent(email)}/approve`,
@@ -785,6 +797,9 @@ function App() {
                       <span>{formatSize(movie.size_bytes)} · Azure Hot</span>
                     </div>
                     <div className="admin-actions">
+                      <button onClick={() => enrichCloudMovie(movie)}>
+                        Actualizar ficha
+                      </button>
                       <button
                         className="delete"
                         onClick={() => deleteCloudMovie(movie)}

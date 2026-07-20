@@ -233,11 +233,12 @@ async function cloudMovies(force = false) {
       size_bytes: blob.properties.contentLength || 0,
       modified_at: blob.properties.lastModified?.toISOString(),
       year: Number(blob.metadata?.year) || null,
-      overview: blob.metadata?.overview || '',
-      genres: metadataGenres(blob.metadata?.genres),
+      overview: metadataText(blob.metadata?.overview),
+      genres: metadataGenres(metadataText(blob.metadata?.genres)),
       rating: Number(blob.metadata?.rating) || null,
-      has_image: false,
+      has_image: Boolean(blob.metadata?.poster),
       has_backdrop: false,
+      poster_blob: blob.metadata?.poster || null,
       source: 'azure'
     });
   }
@@ -265,6 +266,48 @@ function cloudReadUrl(blobName) {
     protocol: 'https'
   }, blobCredential).toString();
   return `${blobContainer.getBlobClient(blobName).url}?${sas}`;
+}
+
+async function enrichCloudMovie(id) {
+  if (!JELLYFIN_URL || !JELLYFIN_API_KEY) throw new Error('Jellyfin no está disponible para buscar metadatos');
+  const blobName = await cloudBlobName(id);
+  if (!blobName) throw new Error('Película Azure no encontrada');
+  const cloudItem = cloudCache.items.find((item) => item.id === id);
+  const sourceTitle = cloudItem?.title || movieTitle(blobName);
+  const targetIdentity = movieIdentity(sourceTitle);
+  const params = new URLSearchParams({
+    Recursive: 'true',
+    IncludeItemTypes: 'Movie,Video',
+    SearchTerm: targetIdentity,
+    Fields: 'Overview,ProductionYear,Genres,CommunityRating',
+    ImageTypeLimit: '1',
+    EnableImageTypes: 'Primary',
+    Limit: '10'
+  });
+  const result = await (await jellyfinFetch(`/Items?${params}`)).json();
+  const match = result.Items.find((item) => movieIdentity(item.Name) === targetIdentity) || result.Items[0];
+  if (!match) throw new Error('No se encontró una coincidencia en Jellyfin');
+
+  const metadata = {
+    title: encodeURIComponent(match.Name || cloudItem?.title || movieTitle(blobName)),
+    year: String(match.ProductionYear || ''),
+    genres: encodeURIComponent((match.Genres || []).join(',')),
+    overview: encodeURIComponent(String(match.Overview || '').slice(0, 1800)),
+    rating: String(match.CommunityRating || '')
+  };
+  if (match.ImageTags?.Primary) {
+    const posterName = `posters/${id}.jpg`;
+    const posterResponse = await jellyfinFetch(`/Items/${encodeURIComponent(match.Id)}/Images/Primary?maxWidth=800&quality=90`);
+    const poster = Buffer.from(await posterResponse.arrayBuffer());
+    await blobContainer.getBlockBlobClient(posterName).uploadData(poster, {
+      blobHTTPHeaders: { blobContentType: posterResponse.headers.get('content-type') || 'image/jpeg' }
+    });
+    metadata.poster = posterName;
+  }
+  await blobContainer.getBlockBlobClient(blobName).setMetadata(metadata);
+  cloudCache.expiresAt = 0;
+  await cloudMovies(true);
+  return cloudCache.items.find((item) => item.id === id);
 }
 
 function* walk(directory) {
@@ -460,7 +503,18 @@ app.post('/api/admin/cloud/finalize', requireAdmin, async (request, response, ne
     if (!(await client.exists())) return response.sendStatus(404);
     await client.setMetadata({ title: encodeURIComponent(movieTitle(title)) });
     cloudCache.expiresAt = 0;
-    response.json({ status: 'ready', id: cloudMovieId(blobName) });
+    const id = cloudMovieId(blobName);
+    let metadata = null;
+    try { metadata = await enrichCloudMovie(id); } catch (error) { console.warn(`Metadatos pendientes: ${error.message}`); }
+    response.json({ status: 'ready', id, metadata: Boolean(metadata) });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post('/api/admin/cloud/:id/enrich', requireAdmin, async (request, response, next) => {
+  try {
+    response.json(await enrichCloudMovie(request.params.id));
   } catch (error) {
     next(error);
   }
@@ -488,7 +542,9 @@ app.delete('/api/admin/cloud/:id', requireAdmin, async (request, response, next)
   try {
     const blobName = await cloudBlobName(request.params.id);
     if (!blobName) return response.sendStatus(404);
+    const item = cloudCache.items.find((movie) => movie.id === request.params.id);
     await blobContainer.deleteBlob(blobName);
+    if (item?.poster_blob) await blobContainer.deleteBlob(item.poster_blob, { deleteSnapshots: 'include' }).catch(() => {});
     cloudCache.expiresAt = 0;
     response.json({ status: 'deleted', id: request.params.id });
   } catch (error) {
@@ -561,6 +617,12 @@ app.get('/api/movies', requireUser, async (request, response, next) => {
 
 app.get('/api/movies/:id/image', requireUser, async (request, response, next) => {
   try {
+    if (request.params.id.startsWith('azure_')) {
+      await cloudMovies();
+      const movie = cloudCache.items.find((item) => item.id === request.params.id);
+      if (!movie?.poster_blob) return response.sendStatus(404);
+      return response.redirect(307, cloudReadUrl(movie.poster_blob));
+    }
     const type = request.query.type === 'Backdrop' ? 'Backdrop' : 'Primary';
     const width = Math.min(Math.max(Number(request.query.width) || 500, 100), 1920);
     const jfResponse = await jellyfinFetch(`/Items/${encodeURIComponent(request.params.id)}/Images/${type}?maxWidth=${width}&quality=85`);
