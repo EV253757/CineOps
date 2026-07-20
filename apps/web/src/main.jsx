@@ -136,6 +136,7 @@ function App() {
   const [requests, setRequests] = useState([]);
   const [users, setUsers] = useState([]);
   const [maintenanceOpen, setMaintenanceOpen] = useState(false);
+  const [maintenanceTab, setMaintenanceTab] = useState("users");
   const [profileOpen, setProfileOpen] = useState(false);
   const [cloudLibrary, setCloudLibrary] = useState({
     items: [],
@@ -153,19 +154,11 @@ function App() {
 
   async function bootstrapSession() {
     try {
-      const identityResponse = await fetch("/api/auth/token", {
+      const identityResponse = await fetch("/api/access/session", {
         cache: "no-store",
       });
       if (!identityResponse.ok) throw new Error("Microsoft no autenticado");
-      const identity = await identityResponse.json();
-      const exchange = await fetch(`${API_URL}/api/auth/exchange`, {
-        method: "POST",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ token: identity.token }),
-      });
-      if (!exchange.ok) throw new Error("No se pudo crear la sesión");
-      const data = await exchange.json();
+      const data = await identityResponse.json();
       setSession(data);
       setAccessToken(data.access_token);
     } catch (error) {
@@ -177,8 +170,8 @@ function App() {
     if (!token) return;
     const headers = { Authorization: `Bearer ${token}` };
     const [requestResponse, usersResponse, cloudResponse] = await Promise.all([
-      fetch(`${API_URL}/api/admin/requests`, { headers }),
-      fetch(`${API_URL}/api/admin/users`, { headers }),
+      fetch("/api/access/admin/requests", { headers }),
+      fetch("/api/access/admin/users", { headers }),
       fetch(`${API_URL}/api/admin/cloud`, { headers }),
     ]);
     if (requestResponse.ok) setRequests((await requestResponse.json()).items);
@@ -301,7 +294,7 @@ function App() {
 
   async function approve(email) {
     const response = await fetch(
-      `${API_URL}/api/admin/requests/${encodeURIComponent(email)}/approve`,
+      `/api/access/admin/requests/${encodeURIComponent(email)}/approve`,
       {
         method: "POST",
         headers: { Authorization: `Bearer ${accessToken}` },
@@ -312,7 +305,7 @@ function App() {
 
   async function reject(email) {
     await fetch(
-      `${API_URL}/api/admin/requests/${encodeURIComponent(email)}/reject`,
+      `/api/access/admin/requests/${encodeURIComponent(email)}/reject`,
       { method: "POST", headers: { Authorization: `Bearer ${accessToken}` } },
     );
     loadRequests();
@@ -320,7 +313,7 @@ function App() {
 
   async function setUserStatus(email, status) {
     await fetch(
-      `${API_URL}/api/admin/users/${encodeURIComponent(email)}/status`,
+      `/api/access/admin/users/${encodeURIComponent(email)}/status`,
       {
         method: "POST",
         headers: {
@@ -341,7 +334,7 @@ function App() {
     )
       return;
     const response = await fetch(
-      `${API_URL}/api/admin/users/${encodeURIComponent(email)}`,
+      `/api/access/admin/users/${encodeURIComponent(email)}`,
       {
         method: "DELETE",
         headers: { Authorization: `Bearer ${accessToken}` },
@@ -715,15 +708,22 @@ function App() {
                 <Icon name="close" />
               </button>
             </header>
-            {!libraryAvailability.local && (
-              <div className="admin-warning">
-                <strong>Servidor local desconectado</strong>
-                <span>
-                  Azure sigue disponible. Revisa Docker, Jellyfin o Tailscale.
-                </span>
-              </div>
-            )}
-            <div className="admin-stats">
+            <nav className="maintenance-tabs" aria-label="Secciones de mantenimiento">
+              <button
+                className={maintenanceTab === "users" ? "active" : ""}
+                onClick={() => setMaintenanceTab("users")}
+              >
+                Usuarios y accesos
+              </button>
+              <button
+                className={maintenanceTab === "movies" ? "active" : ""}
+                onClick={() => setMaintenanceTab("movies")}
+              >
+                Películas y almacenamiento
+              </button>
+            </nav>
+            {maintenanceTab === "users" && <>
+              <div className="admin-stats">
               <div>
                 <strong>{requests.length}</strong>
                 <span>Solicitudes pendientes</span>
@@ -740,8 +740,61 @@ function App() {
                 </strong>
                 <span>Usuarios bloqueados</span>
               </div>
-            </div>
-            <section>
+              </div>
+              <section>
+                <h3>Solicitudes pendientes</h3>
+                {requests.length === 0 ? (
+                  <p className="admin-empty">No hay solicitudes pendientes.</p>
+                ) : (
+                  requests.map((request) => (
+                    <article className="admin-row" key={request.email}>
+                      <div className="admin-avatar">
+                        {request.display_name.slice(0, 2).toUpperCase()}
+                      </div>
+                      <div className="admin-identity">
+                        <strong>{request.display_name}</strong>
+                        <span>{request.email} · Microsoft</span>
+                      </div>
+                      <div className="admin-actions">
+                        <button className="approve" onClick={() => approve(request.email)}>Aprobar</button>
+                        <button onClick={() => reject(request.email)}>Rechazar</button>
+                      </div>
+                    </article>
+                  ))
+                )}
+              </section>
+              <section>
+                <h3>Inventario de usuarios</h3>
+                {users.map((user) => (
+                  <article className="admin-row" key={user.email}>
+                    <div className="admin-avatar">{user.display_name.slice(0, 2).toUpperCase()}</div>
+                    <div className="admin-identity">
+                      <strong>{user.display_name} <em>{user.role}</em></strong>
+                      <span>{user.email}</span>
+                    </div>
+                    <span className={`user-status ${user.status}`}>
+                      {user.status === "approved" ? "Activo" : "Bloqueado"}
+                    </span>
+                    {user.role !== "admin" && (
+                      <div className="admin-actions">
+                        <button onClick={() => setUserStatus(user.email, user.status === "approved" ? "blocked" : "approved")}>
+                          {user.status === "approved" ? "Bloquear" : "Reactivar"}
+                        </button>
+                        <button className="delete" onClick={() => deleteUser(user.email)}>Eliminar</button>
+                      </div>
+                    )}
+                  </article>
+                ))}
+              </section>
+            </>}
+            {maintenanceTab === "movies" && <>
+              {!libraryAvailability.local && (
+                <div className="admin-warning">
+                  <strong>Servidor local desconectado</strong>
+                  <span>Azure sigue disponible. Revisa Docker, Jellyfin o Tailscale.</span>
+                </div>
+              )}
+              <section>
               <div className="cloud-heading">
                 <div>
                   <h3>Biblioteca Azure</h3>
@@ -810,75 +863,8 @@ function App() {
                   </article>
                 ))
               )}
-            </section>
-            <section>
-              <h3>Solicitudes pendientes</h3>
-              {requests.length === 0 ? (
-                <p className="admin-empty">No hay solicitudes pendientes.</p>
-              ) : (
-                requests.map((request) => (
-                  <article className="admin-row" key={request.email}>
-                    <div className="admin-avatar">
-                      {request.display_name.slice(0, 2).toUpperCase()}
-                    </div>
-                    <div className="admin-identity">
-                      <strong>{request.display_name}</strong>
-                      <span>{request.email} · Microsoft</span>
-                    </div>
-                    <div className="admin-actions">
-                      <button
-                        className="approve"
-                        onClick={() => approve(request.email)}
-                      >
-                        Aprobar
-                      </button>
-                      <button onClick={() => reject(request.email)}>
-                        Rechazar
-                      </button>
-                    </div>
-                  </article>
-                ))
-              )}
-            </section>
-            <section>
-              <h3>Inventario de usuarios</h3>
-              {users.map((user) => (
-                <article className="admin-row" key={user.email}>
-                  <div className="admin-avatar">
-                    {user.display_name.slice(0, 2).toUpperCase()}
-                  </div>
-                  <div className="admin-identity">
-                    <strong>
-                      {user.display_name} <em>{user.role}</em>
-                    </strong>
-                    <span>{user.email}</span>
-                  </div>
-                  <span className={`user-status ${user.status}`}>
-                    {user.status === "approved" ? "Activo" : "Bloqueado"}
-                  </span>
-                  {user.role !== "admin" && (
-                    <div className="admin-actions">
-                      <button
-                        onClick={() =>
-                          setUserStatus(
-                            user.email,
-                            user.status === "approved" ? "blocked" : "approved",
-                          )
-                        }
-                      >
-                        {user.status === "approved" ? "Bloquear" : "Reactivar"}
-                      </button>
-                      <button
-                        className="delete"
-                        onClick={() => deleteUser(user.email)}
-                      >
-                        Eliminar
-                      </button>
-                    </div>
-                  )}
-                </article>
-              ))}
-            </section>
+              </section>
+            </>}
           </div>
         </div>
       )}

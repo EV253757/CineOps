@@ -1,0 +1,8 @@
+{
+  "name": "cineops-functions",
+  "private": true,
+  "version": "0.1.0",
+  "dependencies": {
+    "@azure/data-tables": "^13.3.1"
+  }
+}

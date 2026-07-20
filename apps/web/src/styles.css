@@ -625,6 +625,33 @@ kbd {
   font-size: 12px;
   letter-spacing: 0.4px;
 }
+
+.maintenance-tabs {
+  display: flex;
+  gap: 8px;
+  padding: 6px;
+  margin: 4px 0 18px;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.maintenance-tabs button {
+  flex: 1;
+  padding: 11px 14px;
+  border: 0;
+  border-radius: 10px;
+  color: #aeb4c5;
+  background: transparent;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.maintenance-tabs button.active {
+  color: #fff;
+  background: rgba(124, 92, 255, 0.9);
+  box-shadow: 0 8px 24px rgba(83, 55, 198, 0.28);
+}
 .admin-stats {
   display: grid;
   grid-template-columns: repeat(3, 1fr);

@@ -154,6 +154,10 @@ function requireUser(request, response, next) {
   const bearer = request.headers.authorization?.startsWith('Bearer ') ? request.headers.authorization.slice(7) : null;
   const identity = verifySession(cookieValue(request, 'cineops_session') || bearer || request.query.access_token);
   if (!identity?.email) return response.status(401).json({ error: 'Sesión requerida' });
+  if (identity.status === 'approved' && ['admin', 'user'].includes(identity.role)) {
+    request.identity = identity;
+    return next();
+  }
   const access = currentAccess(identity.email);
   if (!access || access.status !== 'approved') return response.status(403).json({ error: 'Acceso pendiente' });
   request.identity = { ...identity, ...access };
