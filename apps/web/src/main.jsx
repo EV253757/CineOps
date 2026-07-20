@@ -189,14 +189,30 @@ function App() {
   async function loadRequests(token = accessToken) {
     if (!token) return;
     const headers = { Authorization: `Bearer ${token}` };
+    const accessFetch = async (azurePath, localPath, options = {}) => {
+      try {
+        const azureResponse = await fetch(azurePath, { ...options, headers: { ...headers, ...options.headers } });
+        if (azureResponse.ok) return azureResponse;
+      } catch {}
+      return fetch(`${API_URL}${localPath}`, { ...options, headers: { ...headers, ...options.headers } });
+    };
     const [requestResponse, usersResponse, cloudResponse] = await Promise.all([
-      fetch("/api/access/admin/requests", { headers }),
-      fetch("/api/access/admin/users", { headers }),
+      accessFetch("/api/access/admin/requests", "/api/admin/requests"),
+      accessFetch("/api/access/admin/users", "/api/admin/users"),
       fetch(`${API_URL}/api/admin/cloud`, { headers }),
     ]);
     if (requestResponse.ok) setRequests((await requestResponse.json()).items);
     if (usersResponse.ok) setUsers((await usersResponse.json()).items);
     if (cloudResponse.ok) setCloudLibrary(await cloudResponse.json());
+  }
+
+  async function mutateAccess(azurePath, localPath, options) {
+    const headers = { Authorization: `Bearer ${accessToken}`, ...options?.headers };
+    try {
+      const response = await fetch(azurePath, { ...options, headers });
+      if (response.ok) return response;
+    } catch {}
+    return fetch(`${API_URL}${localPath}`, { ...options, headers });
   }
 
   async function uploadCloudMovie(event) {
@@ -313,8 +329,9 @@ function App() {
   }
 
   async function approve(email) {
-    const response = await fetch(
+    const response = await mutateAccess(
       `/api/access/admin/requests/${encodeURIComponent(email)}/approve`,
+      `/api/admin/requests/${encodeURIComponent(email)}/approve`,
       {
         method: "POST",
         headers: { Authorization: `Bearer ${accessToken}` },
@@ -324,16 +341,18 @@ function App() {
   }
 
   async function reject(email) {
-    await fetch(
+    await mutateAccess(
       `/api/access/admin/requests/${encodeURIComponent(email)}/reject`,
+      `/api/admin/requests/${encodeURIComponent(email)}/reject`,
       { method: "POST", headers: { Authorization: `Bearer ${accessToken}` } },
     );
     loadRequests();
   }
 
   async function setUserStatus(email, status) {
-    await fetch(
+    await mutateAccess(
       `/api/access/admin/users/${encodeURIComponent(email)}/status`,
+      `/api/admin/users/${encodeURIComponent(email)}/status`,
       {
         method: "POST",
         headers: {
@@ -353,8 +372,9 @@ function App() {
       )
     )
       return;
-    const response = await fetch(
+    const response = await mutateAccess(
       `/api/access/admin/users/${encodeURIComponent(email)}`,
+      `/api/admin/users/${encodeURIComponent(email)}`,
       {
         method: "DELETE",
         headers: { Authorization: `Bearer ${accessToken}` },
